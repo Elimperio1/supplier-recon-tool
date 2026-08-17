@@ -1,0 +1,9 @@
+# Preserve the exact bytes of the Sage-shaped fixture CSVs (UTF-8 BOM + CRLF).
+# The parser tests depend on these bytes; never let Git normalise their EOLs.
+tests/fixtures/*.csv -text
+
+# Normalise source/text to LF in the repo so Windows CRLF churn doesn't pollute diffs.
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf

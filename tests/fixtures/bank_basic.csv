@@ -1,0 +1,13 @@
+﻿sep=,
+"Bank Account 
+                    Date",Payee,Description,Reference,Transaction Type,Account / Customer / Supplier,Debit,Credit,Balance
+8400/000 : Test Bank,,,,,,,,
+Opening Balance as at:  01/03/2026,,,,,,1000.00,,
+01/03/2026,,PnP Crp Grabou08H52 debit card purchase,20260101-0001,Account Payment,Staff Welfare,,157.98,842.02
+01/03/2026,,20260101-0002,20260101-0002,Supplier Payment,Alpha Credit Supplier,,500.00,342.02
+02/03/2026,,split a,20260102-0003,Account Payment,GL One,,100.00,242.02
+02/03/2026,,split b,20260102-0003,Account Payment,GL Two,,200.00,42.02
+02/03/2026,,split c,20260102-0003,Account Payment,GL Three,,50.00,-7.98
+03/03/2026,,a receipt,20260103-0001,Account Receipt,Sales,207.98,,200.00
+Closing Balance as at:  28/02/2027,,,,,,200.00,,
+Grand Total:,,,,,,,540791.34,

@@ -1,0 +1,10 @@
+.streamlit/secrets.toml
+.streamlit/service_account.json
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Client financial exports — never push to GitHub. Kept locally for dev auto-load
+# and the golden-numbers test; a fresh clone simply skips both.
+*.csv
+!tests/fixtures/*.csv

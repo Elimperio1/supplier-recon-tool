@@ -1,0 +1,400 @@
+"""Recon engine: classification + within-supplier and cross-supplier pairing.
+
+All money is integer cents (BUILD.md §2.2); we never compare floats. Dates are
+never a matching signal (§2.2). The engine takes parsed data and returns plain
+dataclasses — the Streamlit UI and the Excel export are two renderers over these.
+"""
+
+from __future__ import annotations
+
+import itertools
+from dataclasses import dataclass, field
+from typing import Optional
+
+from .aliases import derive_supplier_aliases, name_tokens
+from .parse import Supplier, SupplierReport, SupplierTxn
+
+# Classification threshold: |closing| < 1 cent is green.
+GREEN_EPS = 1
+# Near-match (capture typo) tolerance, cents.
+TYPO_TOLERANCE = 5
+# Combination pass bounds (§3.2): skip when a side exceeds this many items.
+COMBO_MAX_ITEMS = 20
+COMBO_MAX_SIZE = 4
+COMBO_BUDGET = 200_000  # hard cap on combinations evaluated per supplier
+
+CAT_GREEN = "green"
+CAT_PAYMENTS = "payments_needed"     # closing credit (>0): invoices exceed payments
+CAT_INVOICES = "invoices_needed"     # closing debit  (<0): payments exceed invoices
+
+BULK_NOTE = "bulk/statement account — request supplier statement"
+OPENING_NOTE = "opening-balance component — request prior-period ledger"
+
+
+# ---------------------------------------------------------------------------
+# Result dataclasses
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TypoPair:
+    invoice: SupplierTxn   # credit side
+    payment: SupplierTxn   # debit side
+    diff_cents: int        # signed: invoice.credit - payment.debit
+
+
+@dataclass
+class CombinationMatch:
+    target: SupplierTxn
+    parts: list[SupplierTxn]
+    target_side: str       # 'payment' (debit) or 'invoice' (credit)
+
+
+@dataclass
+class SupplierResult:
+    supplier: Supplier
+    category: str
+    unmatched_invoices: list[SupplierTxn] = field(default_factory=list)  # unmatched credits
+    unmatched_payments: list[SupplierTxn] = field(default_factory=list)  # unmatched debits
+    matched_pairs: list[tuple[SupplierTxn, SupplierTxn]] = field(default_factory=list)
+    typos: list[TypoPair] = field(default_factory=list)
+    combinations: list[CombinationMatch] = field(default_factory=list)
+    residual_cents: int = 0
+    notes: list[str] = field(default_factory=list)
+    bulk: bool = False
+    opening_component: bool = False
+    evidence_tokens: list[str] = field(default_factory=list)   # name + derived aliases
+    derived_aliases: list[str] = field(default_factory=list)   # from own payment descriptions
+
+    @property
+    def name(self) -> str:
+        return self.supplier.name
+
+    @property
+    def closing(self) -> int:
+        return self.supplier.closing
+
+
+@dataclass
+class CrossSupplierFinding:
+    supplier_a: str
+    supplier_b: str
+    amount_cents: Optional[int]
+    kind: str               # 'balance_mirror' | 'item_match' | 'name_reference'
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EngineResult:
+    suppliers: list[SupplierResult]
+    cross: list[CrossSupplierFinding]
+
+    def by_category(self, category: str) -> list[SupplierResult]:
+        return [r for r in self.suppliers if r.category == category]
+
+    def get(self, name: str) -> Optional[SupplierResult]:
+        for r in self.suppliers:
+            if r.name == name:
+                return r
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Classification
+# ---------------------------------------------------------------------------
+
+def classify(supplier: Supplier) -> str:
+    if abs(supplier.closing) < GREEN_EPS:
+        return CAT_GREEN
+    return CAT_PAYMENTS if supplier.closing > 0 else CAT_INVOICES
+
+
+# ---------------------------------------------------------------------------
+# Within-supplier pairing
+# ---------------------------------------------------------------------------
+
+def _exact_multiset_pair(
+    credits: list[SupplierTxn], debits: list[SupplierTxn]
+) -> tuple[list[tuple[SupplierTxn, SupplierTxn]], list[SupplierTxn], list[SupplierTxn]]:
+    """Pair equal amounts by count (multisets, not sets — identical amounts recur)."""
+    cred_by_amt: dict[int, list[SupplierTxn]] = {}
+    deb_by_amt: dict[int, list[SupplierTxn]] = {}
+    for t in credits:
+        cred_by_amt.setdefault(t.credit, []).append(t)
+    for t in debits:
+        deb_by_amt.setdefault(t.debit, []).append(t)
+
+    matched: list[tuple[SupplierTxn, SupplierTxn]] = []
+    unmatched_c: list[SupplierTxn] = []
+    unmatched_d: list[SupplierTxn] = []
+    for amt in set(cred_by_amt) | set(deb_by_amt):
+        cs = cred_by_amt.get(amt, [])
+        ds = deb_by_amt.get(amt, [])
+        n = min(len(cs), len(ds))
+        matched.extend(zip(cs[:n], ds[:n]))
+        unmatched_c.extend(cs[n:])
+        unmatched_d.extend(ds[n:])
+    unmatched_c.sort(key=lambda t: t.row_index)
+    unmatched_d.sort(key=lambda t: t.row_index)
+    return matched, unmatched_c, unmatched_d
+
+
+def _near_match_pass(
+    unmatched_c: list[SupplierTxn], unmatched_d: list[SupplierTxn]
+) -> tuple[list[TypoPair], list[SupplierTxn], list[SupplierTxn]]:
+    """Pair leftovers within TYPO_TOLERANCE cents -> Capture Typos (never silent)."""
+    typos: list[TypoPair] = []
+    used_d: set[int] = set()
+    consumed_c: set[int] = set()
+    for ci, c in enumerate(unmatched_c):
+        for di, d in enumerate(unmatched_d):
+            if di in used_d:
+                continue
+            diff = c.credit - d.debit
+            if 0 < abs(diff) <= TYPO_TOLERANCE:
+                typos.append(TypoPair(invoice=c, payment=d, diff_cents=diff))
+                used_d.add(di)
+                consumed_c.add(ci)
+                break
+    rem_c = [c for i, c in enumerate(unmatched_c) if i not in consumed_c]
+    rem_d = [d for i, d in enumerate(unmatched_d) if i not in used_d]
+    return typos, rem_c, rem_d
+
+
+def _combination_pass(
+    unmatched_c: list[SupplierTxn], unmatched_d: list[SupplierTxn]
+) -> tuple[list[CombinationMatch], list[SupplierTxn], list[SupplierTxn]]:
+    """One item on one side == exact sum of 2..4 items on the other (§3.2).
+
+    Bounded: only when both sides are <= COMBO_MAX_ITEMS, combos <= size 4, and a
+    hard evaluation budget. Consumes matched items so nothing is reused.
+    """
+    if len(unmatched_c) > COMBO_MAX_ITEMS or len(unmatched_d) > COMBO_MAX_ITEMS:
+        return [], unmatched_c, unmatched_d
+
+    combos: list[CombinationMatch] = []
+    budget = [COMBO_BUDGET]
+    c_amt = [t.credit for t in unmatched_c]
+    d_amt = [t.debit for t in unmatched_d]
+    used_c: set[int] = set()
+    used_d: set[int] = set()
+
+    def search(target_amt: int, parts_amt: list[int], used_parts: set[int]) -> Optional[tuple[int, ...]]:
+        avail = [i for i in range(len(parts_amt)) if i not in used_parts]
+        for size in range(2, COMBO_MAX_SIZE + 1):
+            if len(avail) < size or budget[0] <= 0:
+                continue
+            for combo in itertools.combinations(avail, size):
+                budget[0] -= 1
+                if budget[0] <= 0:
+                    return None
+                if sum(parts_amt[i] for i in combo) == target_amt:
+                    return combo
+        return None
+
+    # one payment (debit) covering N invoices (credits)
+    for di, tgt in enumerate(unmatched_d):
+        if di in used_d or budget[0] <= 0:
+            continue
+        hit = search(tgt.debit, c_amt, used_c)
+        if hit:
+            used_d.add(di)
+            used_c.update(hit)
+            combos.append(CombinationMatch(target=tgt, parts=[unmatched_c[i] for i in hit], target_side="payment"))
+    # one invoice (credit) covered by N payments (debits)
+    for ci, tgt in enumerate(unmatched_c):
+        if ci in used_c or budget[0] <= 0:
+            continue
+        hit = search(tgt.credit, d_amt, used_d)
+        if hit:
+            used_c.add(ci)
+            used_d.update(hit)
+            combos.append(CombinationMatch(target=tgt, parts=[unmatched_d[i] for i in hit], target_side="invoice"))
+
+    rem_c = [t for i, t in enumerate(unmatched_c) if i not in used_c]
+    rem_d = [t for i, t in enumerate(unmatched_d) if i not in used_d]
+    return combos, rem_c, rem_d
+
+
+def analyze_supplier(supplier: Supplier) -> SupplierResult:
+    category = classify(supplier)
+    credits = [t for t in supplier.txns if t.credit]
+    debits = [t for t in supplier.txns if t.debit]
+
+    matched, un_c, un_d = _exact_multiset_pair(credits, debits)
+    result = SupplierResult(supplier=supplier, category=category, matched_pairs=matched)
+
+    # Bulk / statement accounts: never brute-force subset-sum (§3.2, Ithuba Fuels).
+    if len(un_c) > COMBO_MAX_ITEMS or len(un_d) > COMBO_MAX_ITEMS:
+        result.bulk = True
+        result.notes.append(BULK_NOTE)
+    else:
+        typos, un_c, un_d = _near_match_pass(un_c, un_d)
+        combos, un_c, un_d = _combination_pass(un_c, un_d)
+        result.typos = typos
+        result.combinations = combos
+
+    result.unmatched_invoices = sorted(un_c, key=lambda t: t.row_index)
+    result.unmatched_payments = sorted(un_d, key=lambda t: t.row_index)
+    result.residual_cents = (
+        sum(t.credit for t in result.unmatched_invoices)
+        - sum(t.debit for t in result.unmatched_payments)
+    )
+
+    if supplier.opening != 0:
+        result.opening_component = True
+        result.notes.append(OPENING_NOTE)
+
+    # Evidence for bank matching (name tokens + derived aliases); manual aliases
+    # from the Sheet are merged in by the match layer, which has that context.
+    payment_descs = [t.description for t in supplier.txns]
+    result.derived_aliases = derive_supplier_aliases(payment_descs)
+    result.evidence_tokens = _dedupe(name_tokens(supplier.name) + result.derived_aliases)
+    return result
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in items:
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Cross-supplier pass (§3.3)
+# ---------------------------------------------------------------------------
+# The whole risk here is noise: generic location/industry tokens (HERMANUS ×11,
+# STEEL ×4, AGRI, MIDAS) and round amounts (500, 1000) create hundreds of bogus
+# "duplicate account" pairs that bury the two real signals. We gate on:
+#   * distinctiveness — a name token is a cross-reference signal only if it
+#     appears in <= 2 supplier names across the whole client (document frequency);
+#   * uncommon amounts — an amount is only a mirror/item signal when few suppliers
+#     share it, otherwise it needs distinctive name evidence to survive.
+
+MIN_REF_LEN = 4          # tokens shorter than this are never a cross-ref signal
+MAX_NAME_DF = 2          # a distinctive token appears in <= this many supplier names
+
+
+def _name_token_df(results: list[SupplierResult]) -> dict[str, int]:
+    df: dict[str, int] = {}
+    for r in results:
+        for tok in set(name_tokens(r.name)):
+            df[tok] = df.get(tok, 0) + 1
+    return df
+
+
+def cross_supplier(results: list[SupplierResult]) -> list[CrossSupplierFinding]:
+    findings: list[CrossSupplierFinding] = []
+    seen: set[tuple] = set()
+    df = _name_token_df(results)
+
+    def distinctive(name: str) -> set[str]:
+        return {t for t in name_tokens(name) if len(t) >= MIN_REF_LEN and df.get(t, 0) <= MAX_NAME_DF}
+
+    def name_evidence(a: SupplierResult, b: SupplierResult) -> list[str]:
+        """Distinctive tokens shared between A's evidence and B's name (both dirs)."""
+        a_ev = set(a.evidence_tokens)
+        ev = (a_ev & distinctive(b.name)) | (set(b.evidence_tokens) & distinctive(a.name))
+        return sorted(ev)
+
+    reds = [r for r in results if r.category != CAT_GREEN]
+
+    # 1. Whole-balance mirrors: closing A == -closing B. A mirror is only trusted
+    #    when the magnitude is distinctive (exactly one +supplier and one -supplier
+    #    at that magnitude); coincidental round-number mirrors (three suppliers at
+    #    ±500) survive only with distinctive name evidence. Real distinctive hits:
+    #    Overstrand/Overberg 6702.21, Hermanus Toyota/Cybed 4341.30.
+    pos = [r for r in reds if r.closing > 0]
+    neg = [r for r in reds if r.closing < 0]
+    mag_pos: dict[int, int] = {}
+    mag_neg: dict[int, int] = {}
+    for r in pos:
+        mag_pos[r.closing] = mag_pos.get(r.closing, 0) + 1
+    for r in neg:
+        mag_neg[-r.closing] = mag_neg.get(-r.closing, 0) + 1
+    for a in pos:
+        for b in neg:
+            if a.closing != -b.closing:
+                continue
+            ev = name_evidence(a, b)
+            unique_mag = mag_pos.get(a.closing, 0) == 1 and mag_neg.get(a.closing, 0) == 1
+            if not unique_mag and not ev:
+                continue  # ambiguous round-number mirror with no corroboration
+            key = ("balance_mirror", a.name, b.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(CrossSupplierFinding(
+                supplier_a=a.name, supplier_b=b.name,
+                amount_cents=a.closing, kind="balance_mirror", evidence=ev,
+            ))
+
+    # 2. Item-level exact matches: unmatched invoice of A == unmatched payment of B.
+    #    An amount shared by many suppliers (round sums) needs distinctive evidence.
+    #    Bulk/statement accounts are excluded — their unmatched lists are hundreds of
+    #    items and would collide with everything by chance.
+    reds_nb = [r for r in reds if not r.bulk]
+    amt_suppliers: dict[int, set[str]] = {}
+    for r in reds_nb:
+        for t in r.unmatched_invoices:
+            amt_suppliers.setdefault(t.credit, set()).add(r.name)
+        for t in r.unmatched_payments:
+            amt_suppliers.setdefault(t.debit, set()).add(r.name)
+    inv_index: dict[int, list[SupplierResult]] = {}
+    for r in reds_nb:
+        for t in r.unmatched_invoices:
+            inv_index.setdefault(t.credit, []).append(r)
+    for b in reds_nb:
+        for t in b.unmatched_payments:
+            for a in inv_index.get(t.debit, []):
+                if a.name == b.name:
+                    continue
+                ev = name_evidence(a, b)
+                common = len(amt_suppliers.get(t.debit, set())) > 2
+                if common and not ev:
+                    continue
+                key = ("item_match", a.name, b.name, t.debit)
+                if key in seen:
+                    continue
+                seen.add(key)
+                findings.append(CrossSupplierFinding(
+                    supplier_a=a.name, supplier_b=b.name,
+                    amount_cents=t.debit, kind="item_match", evidence=ev,
+                ))
+
+    # 3. Name references: A's *payment descriptions* distinctively name B (possible
+    #    duplicate/mis-captured accounts). Keyed on A's derived aliases — what A
+    #    actually wrote when paying — not on shared name tokens, so two suppliers
+    #    that merely share a town don't pair. Real: Agrimark ↔ Elgin Agrimark / Kaap
+    #    Agri Elgin (payments say ELGIN / KAAP).
+    for a in results:
+        a_derived = set(a.derived_aliases)
+        if not a_derived:
+            continue
+        for b in results:
+            if a.name == b.name:
+                continue
+            overlap = a_derived & distinctive(b.name)
+            if not overlap:
+                continue
+            key = ("name_reference", a.name, b.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(CrossSupplierFinding(
+                supplier_a=a.name, supplier_b=b.name, amount_cents=None,
+                kind="name_reference", evidence=sorted(overlap),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Top-level
+# ---------------------------------------------------------------------------
+
+def analyze(report: SupplierReport) -> EngineResult:
+    results = [analyze_supplier(s) for s in report.suppliers]
+    cross = cross_supplier(results)
+    return EngineResult(suppliers=results, cross=cross)

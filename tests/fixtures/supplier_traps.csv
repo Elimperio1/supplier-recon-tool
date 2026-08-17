@@ -1,0 +1,44 @@
+﻿sep=,
+"Supplier 
+                            Date",Reference,Transaction Type,Description,Debit,Credit,Balance
+Alpha Credit Supplier,,,,,,
+Opening Balance as at:  01/03/2026,,,,,0,
+28/07/2026,SIV0001,Supplier Invoice,alpha inv,,"1,234.56",1234.56
+28/07/2026,PAY0001,Supplier Payment,"20260728-0003, ALPHA WIDGETS ib payment",234.56,,1000.00
+Closing Balance as at:  28/02/2027,,,,,1000.00,
+Movement for the period,,,,,1000.00,
+Beta Debit Supplier,,,,,,
+Opening Balance as at:  01/03/2026,,,,,0,
+02/03/2026,PAY0002,Supplier Payment,"20260302-0001, BETA GARAGE",500.00,,-500.00
+02/03/2026,SIV0002,Supplier Invoice,beta inv,,200.00,-300.00
+Closing Balance as at:  28/02/2027,,,,300.00,,
+Movement for the period,,,,,0,
+Gamma Opening Only,,,,,,
+Opening Balance as at:  01/03/2026,,,,,100.00,
+Closing Balance as at:  28/02/2027,,,,,100.00,
+Movement for the period,,,,,0,
+Delta Combo,,,,,,
+Opening Balance as at:  01/03/2026,,,,,0,
+05/03/2026,SIV0003,Supplier Invoice,,,50.00,50.00
+05/03/2026,SIV0004,Supplier Invoice,16/03/2026,,60.00,110.00
+06/03/2026,PAY0003,Supplier Payment,"20260306-0002, DELTA CORP",110.00,,0.00
+Closing Balance as at:  28/02/2027,,,,,0,
+Movement for the period,,,,,0,
+Typo Supplier,,,,,,
+Opening Balance as at:  01/03/2026,,,,,0,
+07/03/2026,SIV0005,Supplier Invoice,typo inv,,1369.26,1369.26
+07/03/2026,PAY0004,Supplier Payment,"20260307-0001, TYPO LTD",1369.28,,-0.02
+Closing Balance as at:  28/02/2027,,,,0.02,,
+Movement for the period,,,,,0,
+Repeat Supplier,,,,,,
+Opening Balance as at:  01/03/2026,,,,,0,
+08/03/2026,SIV0006,Supplier Invoice,r1,,50.00,50.00
+08/03/2026,SIV0007,Supplier Invoice,r2,,50.00,100.00
+08/03/2026,PAY0005,Supplier Payment,"20260308-0001, REPEAT",50.00,,50.00
+Closing Balance as at:  28/02/2027,,,,,50.00,
+Movement for the period,,,,,0,
+Weird Supplier,,,,,,
+Opening Balance as at:  01/03/2026,,,,,0,
+Note: manual adjustment pending,see accountant,,,,,
+Closing Balance as at:  28/02/2027,,,,,0,
+Grand Total:,,,,,1200.00,
