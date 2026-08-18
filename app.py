@@ -66,11 +66,10 @@ header[data-testid="stHeader"],footer,[data-testid="stSidebar"],[data-testid="st
 .block-container{max-width:1180px;padding-top:1.6rem;padding-bottom:4rem;}
 
 /* hero ------------------------------------------------------------------ */
-.hero{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
+.hero{display:flex;align-items:center;justify-content:space-between;gap:16px;
   margin:.2rem 0 1.4rem;}
 .hero__title{font-size:2.05rem;font-weight:640;letter-spacing:-.03em;color:var(--ink);
   line-height:1.05;}
-.hero__sub{margin-top:.35rem;font-size:.98rem;color:var(--ink2);letter-spacing:-.01em;}
 .pill{display:inline-flex;align-items:center;gap:.4rem;padding:.34rem .72rem;border-radius:980px;
   font-size:.8rem;font-weight:590;letter-spacing:-.01em;white-space:nowrap;border:1px solid transparent;}
 .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.9;}
@@ -163,8 +162,6 @@ def hero(status_text: str, status_tone: str) -> None:
         f"""<div class="hero">
           <div class="hero__main">
             <div class="hero__title">Supplier Recon</div>
-            <div class="hero__sub">Deterministic reconciliation for Sage Business Cloud
-              · no AI matching · no Sage API · worksheets you action manually</div>
           </div>
           <div class="pill pill--{status_tone}">{esc(status_text)}</div>
         </div>""",
