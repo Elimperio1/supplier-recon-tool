@@ -1,6 +1,6 @@
 """Alias derivation and text normalisation (BUILD.md §4).
 
-Two alias sources feed a supplier's *evidence set* — the tokens we look for inside
+Two alias sources feed a supplier's *evidence set* - the tokens we look for inside
 a bank line's description:
 
   * **Derived** (per upload, no storage): the supplier's own payment descriptions.
@@ -93,7 +93,7 @@ def derive_supplier_aliases(descriptions: Iterable[str]) -> list[str]:
 
     Only descriptions carrying the batch prefix teach us anything (that prefix is
     the tell that bank statement text follows). Bank ``Supplier Payment`` rows,
-    whose description is just the batch ref, teach nothing — hence we key on the
+    whose description is just the batch ref, teach nothing - hence we key on the
     prefix, not on row type.
     """
     tokens: list[str] = []
@@ -112,7 +112,7 @@ def manual_alias_evidence(pattern: str) -> list[str]:
     """Evidence strings for a manually-seeded alias pattern.
 
     Adds both the full squashed phrase and its individual tokens, and does NOT
-    drop stopwords or length — the human chose this pattern deliberately.
+    drop stopwords or length - the human chose this pattern deliberately.
     """
     out: list[str] = []
     seen: set[str] = set()

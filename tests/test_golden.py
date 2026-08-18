@@ -1,9 +1,9 @@
-"""Golden numbers (BUILD.md §9) — the build MUST reproduce these on the two real
+"""Golden numbers (BUILD.md §9) - the build MUST reproduce these on the two real
 Sage exports. Skips automatically when the client CSVs are absent (fresh clone /
 CI), since they are gitignored client data.
 
 A disagreement here means a real regression: fix the build, not the numbers
-(unless the CSVs themselves changed — then re-measure and update §9 and this file).
+(unless the CSVs themselves changed - then re-measure and update §9 and this file).
 """
 
 from pathlib import Path

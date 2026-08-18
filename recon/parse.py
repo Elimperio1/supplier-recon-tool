@@ -1,6 +1,6 @@
 """Parse the two Sage Business Cloud CSV exports into plain dataclasses.
 
-Everything here is stdlib only (``csv`` + ``decimal``). See BUILD.md §2 — every
+Everything here is stdlib only (``csv`` + ``decimal``). See BUILD.md §2 - every
 rule below has a real failure on the real data behind it.
 
 Money is integer **cents** end-to-end. Sign conventions (BUILD.md §2.1):
@@ -8,7 +8,7 @@ Money is integer **cents** end-to-end. Sign conventions (BUILD.md §2.1):
   * Bank report:      ``signed = debit  - credit``  (inverted semantics, §2.4)
 
 Balances (opening AND closing) live in whichever of the Debit/Credit columns
-matches their sign, so we ALWAYS read both columns and subtract — never one.
+matches their sign, so we ALWAYS read both columns and subtract - never one.
 """
 
 from __future__ import annotations
@@ -177,7 +177,7 @@ def parse_supplier_report(source: Source) -> SupplierReport:
             continue
 
         if current is None:
-            # Data before any section header — should not happen; never drop it.
+            # Data before any section header - should not happen; never drop it.
             if c0:
                 report.unrecognized.append((i, row))
             continue
@@ -187,7 +187,7 @@ def parse_supplier_report(source: Source) -> SupplierReport:
         elif c0.startswith("Closing Balance"):
             current.closing = _balance_signed(row, S_DEBIT, S_CREDIT, credit_positive=True)
         elif c0.startswith("Movement for the period") or c0.startswith("Grand Total"):
-            continue  # known footers; carry a value cell — never a txn/header
+            continue  # known footers; carry a value cell - never a txn/header
         elif DATE_RE.match(c0):
             current.txns.append(SupplierTxn(
                 supplier=current.name,
@@ -223,13 +223,13 @@ B_DESC, B_REF, B_TYPE, B_ACCT, B_DEBIT, B_CREDIT, B_BALANCE = 2, 3, 4, 5, 6, 7, 
 @dataclass
 class BankTxn:
     account: str            # bank account section name
-    row_index: int          # global CSV row index — identity (§2.4: never the ref alone)
+    row_index: int          # global CSV row index - identity (§2.4: never the ref alone)
     date: str
     payee: str
     description: str
     reference: str          # batch ref, may repeat across rows
     txn_type: str
-    allocation: str         # "Account / Customer / Supplier" — GL acct or supplier/customer
+    allocation: str         # "Account / Customer / Supplier" - GL acct or supplier/customer
     debit: Optional[int]    # cents (money IN)
     credit: Optional[int]   # cents (money OUT)
     balance_raw: str

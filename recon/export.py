@@ -88,7 +88,7 @@ def _summary_sheet(ws: Worksheet, engine: EngineResult) -> None:
         fill, font = (GREEN_FILL, GREEN_FONT) if res.category == CAT_GREEN else (RED_FILL, RED_FONT)
         cat_cell.fill, cat_cell.font = fill, font
         s = res.supplier
-        integ = "OK" if s.integrity_ok else f"MISMATCH Δ{_rand(s.integrity_delta)}"
+        integ = "OK" if s.integrity_ok else f"MISMATCH off by {_rand(s.integrity_delta)}"
         ic = _put(ws, r, 4, integ)
         if not s.integrity_ok:
             ic.fill, ic.font = RED_FILL, RED_FONT

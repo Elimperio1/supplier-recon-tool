@@ -9,7 +9,7 @@ a value into a date:
   * log a confirmed match  -> ``match_log`` tab
 
 Graceful degradation is the contract: every method fails soft. A dead memory
-layer must never crash the recon — the caller warns and disables persistence.
+layer must never crash the recon - the caller warns and disables persistence.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ class SheetsClient:
         try:
             gc = gspread.service_account_from_dict(service_account_info)
             ss = gc.open_by_key(spreadsheet_id)
-        except Exception as exc:  # noqa: BLE001 — fail soft to the caller
+        except Exception as exc:  # noqa: BLE001 - fail soft to the caller
             raise SheetsError(f"Google Sheets unreachable: {exc}") from exc
         return cls(ss)
 

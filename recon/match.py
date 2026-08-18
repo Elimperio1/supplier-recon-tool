@@ -4,7 +4,7 @@ For each unmatched invoice we look for the bank payment that settled it but was
 booked to a GL account instead of the supplier. The whole credibility of the tool
 lives in the verdict tiers: we would rather say "ambiguous" than name a wrong pick.
 
-Search space is bank ``Account Payment`` rows ONLY — a ``Supplier Payment`` row is
+Search space is bank ``Account Payment`` rows ONLY - a ``Supplier Payment`` row is
 already in some supplier's ledger, so offering it would re-allocate someone else's
 match. Amounts come from the Credit column (money out, inverted semantics §2.4).
 Dates are never used (§2.2).
@@ -20,7 +20,7 @@ from .engine import CAT_PAYMENTS, SupplierResult
 from .parse import BankReport, BankTxn, SupplierTxn
 
 # An amount matching more than this many bank lines is "common" (R155 honouring
-# fee, R500 round sums) — needs description evidence or it is ambiguous.
+# fee, R500 round sums) - needs description evidence or it is ambiguous.
 COMMON_AMOUNT_THRESHOLD = 5
 # Never dump 40 candidate lines at the accountant; cap and say how many were cut.
 CANDIDATE_CAP = 8
@@ -59,7 +59,7 @@ class MatchResult:
 
     @property
     def top(self) -> Optional[Candidate]:
-        """The single pick — only ever set for a confident verdict (§3.4)."""
+        """The single pick - only ever set for a confident verdict (§3.4)."""
         return self.candidates[0] if self.verdict == VERDICT_CONFIDENT and self.candidates else None
 
 
@@ -108,7 +108,7 @@ def search_invoice(
         result.candidates = winners
         return result
 
-    # Otherwise ambiguous — list candidates, never mark a top pick.
+    # Otherwise ambiguous - list candidates, never mark a top pick.
     result.verdict = VERDICT_AMBIGUOUS
     ranked = _rank(scored)
     if common:
@@ -124,11 +124,11 @@ def search_invoice(
     else:
         result.candidates = ranked
         if not with_ev and len(hits) == 1:
-            result.note = "single candidate on amount only — no description evidence."
+            result.note = "single candidate on amount only - no description evidence."
         elif not with_ev:
-            result.note = f"{len(hits)} candidates, all on amount only — no description evidence."
+            result.note = f"{len(hits)} candidates, all on amount only - no description evidence."
         else:
-            result.note = f"{len(with_ev)} candidates carry name evidence but tie — no single pick."
+            result.note = f"{len(with_ev)} candidates carry name evidence but tie - no single pick."
     return result
 
 
@@ -159,7 +159,7 @@ def match_supplier(
     manual_patterns: Iterable[str] = (),
 ) -> list[MatchResult]:
     """Search bank candidates for each of a Payments Needed supplier's unmatched
-    invoices. Bulk/statement accounts are skipped (§3.2) — the label stands in."""
+    invoices. Bulk/statement accounts are skipped (§3.2) - the label stands in."""
     if result.category != CAT_PAYMENTS or result.bulk:
         return []
     evidence = supplier_evidence(result, manual_patterns)

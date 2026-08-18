@@ -2,7 +2,7 @@
 
 All money is integer cents (BUILD.md §2.2); we never compare floats. Dates are
 never a matching signal (§2.2). The engine takes parsed data and returns plain
-dataclasses — the Streamlit UI and the Excel export are two renderers over these.
+dataclasses - the Streamlit UI and the Excel export are two renderers over these.
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ CAT_GREEN = "green"
 CAT_PAYMENTS = "payments_needed"     # closing credit (>0): invoices exceed payments
 CAT_INVOICES = "invoices_needed"     # closing debit  (<0): payments exceed invoices
 
-BULK_NOTE = "bulk/statement account — request supplier statement"
-OPENING_NOTE = "opening-balance component — request prior-period ledger"
+BULK_NOTE = "bulk/statement account - request supplier statement"
+OPENING_NOTE = "opening-balance component - request prior-period ledger"
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +115,7 @@ def classify(supplier: Supplier) -> str:
 def _exact_multiset_pair(
     credits: list[SupplierTxn], debits: list[SupplierTxn]
 ) -> tuple[list[tuple[SupplierTxn, SupplierTxn]], list[SupplierTxn], list[SupplierTxn]]:
-    """Pair equal amounts by count (multisets, not sets — identical amounts recur)."""
+    """Pair equal amounts by count (multisets, not sets - identical amounts recur)."""
     cred_by_amt: dict[int, list[SupplierTxn]] = {}
     deb_by_amt: dict[int, list[SupplierTxn]] = {}
     for t in credits:
@@ -268,9 +268,9 @@ def _dedupe(items: list[str]) -> list[str]:
 # The whole risk here is noise: generic location/industry tokens (HERMANUS ×11,
 # STEEL ×4, AGRI, MIDAS) and round amounts (500, 1000) create hundreds of bogus
 # "duplicate account" pairs that bury the two real signals. We gate on:
-#   * distinctiveness — a name token is a cross-reference signal only if it
+#   * distinctiveness - a name token is a cross-reference signal only if it
 #     appears in <= 2 supplier names across the whole client (document frequency);
-#   * uncommon amounts — an amount is only a mirror/item signal when few suppliers
+#   * uncommon amounts - an amount is only a mirror/item signal when few suppliers
 #     share it, otherwise it needs distinctive name evidence to survive.
 
 MIN_REF_LEN = 4          # tokens shorter than this are never a cross-ref signal
@@ -333,7 +333,7 @@ def cross_supplier(results: list[SupplierResult]) -> list[CrossSupplierFinding]:
 
     # 2. Item-level exact matches: unmatched invoice of A == unmatched payment of B.
     #    An amount shared by many suppliers (round sums) needs distinctive evidence.
-    #    Bulk/statement accounts are excluded — their unmatched lists are hundreds of
+    #    Bulk/statement accounts are excluded - their unmatched lists are hundreds of
     #    items and would collide with everything by chance.
     reds_nb = [r for r in reds if not r.bulk]
     amt_suppliers: dict[int, set[str]] = {}
@@ -365,8 +365,8 @@ def cross_supplier(results: list[SupplierResult]) -> list[CrossSupplierFinding]:
                 ))
 
     # 3. Name references: A's *payment descriptions* distinctively name B (possible
-    #    duplicate/mis-captured accounts). Keyed on A's derived aliases — what A
-    #    actually wrote when paying — not on shared name tokens, so two suppliers
+    #    duplicate/mis-captured accounts). Keyed on A's derived aliases - what A
+    #    actually wrote when paying - not on shared name tokens, so two suppliers
     #    that merely share a town don't pair. Real: Agrimark ↔ Elgin Agrimark / Kaap
     #    Agri Elgin (payments say ELGIN / KAAP).
     for a in results:
