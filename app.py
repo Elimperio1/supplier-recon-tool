@@ -14,7 +14,6 @@ all default Streamlit chrome (menu, footer, header, sidebar) hidden. No sidebar.
 from __future__ import annotations
 
 import html
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -29,11 +28,6 @@ from recon import sheets as sheets_mod
 
 st.set_page_config(page_title="Supplier Recon", layout="wide",
                    initial_sidebar_state="collapsed")
-
-HERE = Path(__file__).parent
-DEV_SUPPLIER = "SupplierTransactionsReport (5).csv"
-DEV_BANK = "BanksAndCreditCardsTransactionsReport (2).csv"
-
 
 # ===========================================================================
 # Design layer
@@ -271,22 +265,18 @@ with st.expander("Data & client", expanded=not have_supplier):
                                 help="Scopes learned aliases and the match log.")
     sup_file = cols[1].file_uploader("Supplier Transactions Report", type="csv", key="sup")
     bank_file = cols[2].file_uploader("Banks & Credit Cards Report", type="csv", key="bank")
-    dev_mode = st.checkbox("Load the sample CSVs bundled for local dev",
-                           value=not (sup_file and bank_file))
     if client_status is None and client_err:
         st.caption(f"Memory (Google Sheets) offline - recon still runs, saving disabled. {client_err}")
 
 
-def _load(uploaded, dev_name: str):
+def _load(uploaded):
     if uploaded is not None:
         return uploaded.getvalue()
-    if dev_mode and (HERE / dev_name).exists():
-        return (HERE / dev_name).read_bytes()
     return None
 
 
-supplier_bytes = _load(sup_file, DEV_SUPPLIER)
-bank_bytes = _load(bank_file, DEV_BANK)
+supplier_bytes = _load(sup_file)
+bank_bytes = _load(bank_file)
 
 if supplier_bytes is None:
     st.markdown(
