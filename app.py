@@ -64,11 +64,6 @@ header[data-testid="stHeader"],footer,[data-testid="stSidebar"],[data-testid="st
   margin:.2rem 0 1.4rem;}
 .hero__title{font-size:2.05rem;font-weight:640;letter-spacing:-.03em;color:var(--ink);
   line-height:1.05;}
-.pill{display:inline-flex;align-items:center;gap:.4rem;padding:.34rem .72rem;border-radius:980px;
-  font-size:.8rem;font-weight:590;letter-spacing:-.01em;white-space:nowrap;border:1px solid transparent;}
-.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.9;}
-.pill--green{color:var(--g-fg);background:var(--g-bg);}
-.pill--amber{color:var(--a-fg);background:var(--a-bg);}
 
 /* stat tiles ------------------------------------------------------------ */
 .tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:.2rem 0 1.1rem;}
@@ -151,16 +146,9 @@ def esc(s) -> str:
     return html.escape(str(s))
 
 
-def hero(status_text: str, status_tone: str) -> None:
-    st.markdown(
-        f"""<div class="hero">
-          <div class="hero__main">
-            <div class="hero__title">Supplier Recon</div>
-          </div>
-          <div class="pill pill--{status_tone}">{esc(status_text)}</div>
-        </div>""",
-        unsafe_allow_html=True,
-    )
+def hero() -> None:
+    st.markdown('<div class="hero"><div class="hero__title">Supplier Recon</div></div>',
+                unsafe_allow_html=True)
 
 
 def tiles(items: list[tuple[str, str, str]]) -> None:
@@ -250,12 +238,11 @@ def _manual_patterns(aliases, client: str) -> dict[str, list[str]]:
 # ===========================================================================
 
 inject_css()
+hero()
 
+# Sheets status is surfaced where it matters (inside the setup panel and on the
+# save/log controls), not as a persistent header badge.
 client_status, client_err = _sheets_client()
-if client_status is not None:
-    hero("Memory connected", "green")
-else:
-    hero("Memory offline", "amber")
 
 # ---- Setup (main body, no sidebar) ----------------------------------------
 have_supplier = st.session_state.get("sup") is not None
