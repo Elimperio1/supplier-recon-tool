@@ -12,14 +12,15 @@ FIX = Path(__file__).parent / "fixtures"
 BANK = FIX / "bank_basic.csv"
 
 
-def _bank_txn(amount_out, desc, rowidx, ttype="Account Payment", alloc="GL", ref="R"):
-    return BankTxn(account="8400", row_index=rowidx, date="01/01/2026", payee="",
+def _bank_txn(amount_out, desc, rowidx, ttype="Account Payment", alloc="GL", ref="R",
+              date="01/01/2026"):
+    return BankTxn(account="8400", row_index=rowidx, date=date, payee="",
                    description=desc, reference=ref, txn_type=ttype, allocation=alloc,
                    debit=None, credit=amount_out, balance_raw="")
 
 
-def _inv(amount, ref="SIV"):
-    return SupplierTxn("S", "01/01/2026", ref, "Supplier Invoice", "inv", None, amount, "", 1)
+def _inv(amount, ref="SIV", date="01/01/2026"):
+    return SupplierTxn("S", date, ref, "Supplier Invoice", "inv", None, amount, "", 1)
 
 
 # -- search space -----------------------------------------------------------
@@ -80,6 +81,34 @@ def test_common_amount_unique_evidence_still_confident():
     res = search_invoice(_inv(50000), 50000, ["ROBERTSON"], {50000: hits}, "Robertson Shell")
     assert res.verdict == VERDICT_CONFIDENT
     assert res.top.matched_tokens == ["ROBERTSON"]
+
+
+# -- feasibility: a payment cannot predate its invoice -----------------------
+
+def test_candidates_predating_invoice_excluded():
+    # Two amount hits, one before the invoice date and one after with evidence;
+    # only the later one is a candidate, so it wins confident.
+    idx = {15798: [
+        _bank_txn(15798, "PNP earlier purchase", 1, date="01/06/2026"),
+        _bank_txn(15798, "PNP later purchase", 2, date="20/06/2026"),
+    ]}
+    res = search_invoice(_inv(15798, date="15/06/2026"), 15798, ["PNP"], idx, "Pick n Pay")
+    assert res.verdict == VERDICT_CONFIDENT
+    assert res.total_hits == 1
+    assert res.top.txn.date == "20/06/2026"
+
+
+def test_all_candidates_predate_invoice_is_none_with_reason():
+    idx = {15798: [_bank_txn(15798, "PNP purchase", 1, date="01/06/2026")]}
+    res = search_invoice(_inv(15798, date="15/06/2026"), 15798, ["PNP"], idx, "Pick n Pay")
+    assert res.verdict == VERDICT_NONE
+    assert "predate the invoice" in res.note
+
+
+def test_same_day_candidate_is_feasible():
+    idx = {15798: [_bank_txn(15798, "PNP purchase", 1, date="15/06/2026")]}
+    res = search_invoice(_inv(15798, date="15/06/2026"), 15798, ["PNP"], idx, "Pick n Pay")
+    assert res.verdict == VERDICT_CONFIDENT
 
 
 # -- integration ------------------------------------------------------------

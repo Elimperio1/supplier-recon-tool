@@ -85,8 +85,13 @@ Rule: for every balance row, read **both** columns and compute
 - Dates are **DD/MM/YYYY**. If pandas is used anywhere for display, `dayfirst=True`.
   The closing date is in the future (FY runs 01/03/2026–28/02/2027) — NEVER filter
   rows by "date ≤ today".
-- Dates are **not a matching signal** anywhere: supplier payments happen months after
-  invoices. Use dates only for display and sorting.
+- Dates never decide **which** items pair on amount: supplier payments happen months
+  after invoices. Use dates for display and sorting, plus two rules added 2026-08-19:
+  - **Confidence grading** (Ledger): a pair is green only when the payment falls ON
+    the invoice date or up to 10 days AFTER it; anything else is yellow (review).
+  - **Feasibility** (bank-candidate search): a bank payment dated BEFORE the invoice
+    cannot be its settlement - you cannot pay an invoice that does not exist yet -
+    so it is excluded as a candidate. Unparseable dates fail open.
 
 ### 2.3 Supplier report columns
 

@@ -7,7 +7,10 @@ lives in the verdict tiers: we would rather say "ambiguous" than name a wrong pi
 Search space is bank ``Account Payment`` rows ONLY - a ``Supplier Payment`` row is
 already in some supplier's ledger, so offering it would re-allocate someone else's
 match. Amounts come from the Credit column (money out, inverted semantics §2.4).
-Dates are never used (§2.2).
+Dates never RANK candidates, but one feasibility rule applies (2026-08-19): a
+bank payment dated BEFORE the invoice cannot be its settlement - you cannot pay
+an invoice that does not exist yet - so such candidates are excluded up front.
+Unparseable dates fail open (the candidate is kept).
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 from .aliases import evidence_hits, manual_alias_evidence, name_acronym
-from .engine import CAT_PAYMENTS, SupplierResult
+from .engine import CAT_PAYMENTS, SupplierResult, _parse_dmy
 from .parse import BankReport, BankTxn, SupplierTxn
 
 # An amount matching more than this many bank lines is "common" (R155 honouring
@@ -85,11 +88,28 @@ def search_invoice(
     supplier_name: str,
 ) -> MatchResult:
     hits = index.get(amount_cents, [])
+    # Feasibility: a payment cannot predate its invoice. Filter strictly-earlier
+    # candidates out; unparseable dates on either side fail open.
+    inv_date = _parse_dmy(invoice.date)
+    predating = 0
+    if inv_date is not None:
+        feasible = []
+        for t in hits:
+            t_date = _parse_dmy(t.date)
+            if t_date is not None and t_date < inv_date:
+                predating += 1
+            else:
+                feasible.append(t)
+        hits = feasible
     result = MatchResult(supplier=supplier_name, invoice=invoice,
                          amount_cents=amount_cents, verdict=VERDICT_NONE,
                          total_hits=len(hits))
     if not hits:
-        result.note = NONE_NOTE
+        if predating:
+            result.note = (f"{predating} bank payment(s) match the amount but predate "
+                           "the invoice - a payment cannot settle a later invoice")
+        else:
+            result.note = NONE_NOTE
         return result
 
     evidence = list(evidence)

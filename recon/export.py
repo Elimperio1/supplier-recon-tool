@@ -201,8 +201,9 @@ LEDGER_STYLE = {
 
 def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
     """The source report reproduced in full - every transaction with its date -
-    each row graded: green = matched within 10 days, yellow = same amount but
-    needs review (far apart / near-miss / combination), red = no counterpart."""
+    each row graded: green = paid on the invoice date or up to 10 days after,
+    yellow = same amount but needs review (paid BEFORE the invoice, too long
+    after, near-miss, out-of-window combination), red = no counterpart."""
     headers = ["Supplier", "Date", "Reference", "Type", "Description",
                "Debit (R)", "Credit (R)", "Status", "Match"]
     _header(ws, headers)

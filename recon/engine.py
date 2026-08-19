@@ -18,7 +18,7 @@ from .parse import Supplier, SupplierReport, SupplierTxn
 # Bumped on ANY change to result shapes or matching behavior. app.py uses this
 # both as the st.cache_data salt AND to detect a stale module surviving a
 # Streamlit Cloud redeploy (the process keeps sys.modules across git pushes).
-ENGINE_VERSION = 5
+ENGINE_VERSION = 6
 
 # Classification threshold: |closing| < 1 cent is green.
 GREEN_EPS = 1
@@ -549,11 +549,12 @@ def cross_account_settlements(
 # Ledger view: every transaction graded green / yellow / red
 # ---------------------------------------------------------------------------
 # Mirrors the source report (all txns, all dates, in ledger order) with a status
-# per row. Dates are still never a MATCHING signal (§2.2) - they grade the
-# CONFIDENCE of matches already made on amount:
-#   green  - matched, and the two dates are within MATCH_WINDOW_DAYS of each other
-#   yellow - same amount matched but far apart in time (possibly a different
-#            payment), a near-match typo, or an out-of-window combination
+# per row. Amount still decides WHICH items pair; dates grade the CONFIDENCE of
+# a pair, and the grade is DIRECTIONAL - a payment can only settle an invoice
+# that already exists, so it must fall ON or AFTER the invoice date:
+#   green  - matched, paid on the invoice date or up to MATCH_WINDOW_DAYS after
+#   yellow - same amount but suspect: paid BEFORE the invoice date, paid too
+#            long after, a near-match typo, or an out-of-window combination
 #   red    - no matching counterpart at all
 
 MATCH_WINDOW_DAYS = 10
@@ -577,11 +578,27 @@ def _parse_dmy(s: str):
         return None
 
 
-def _days_apart(d1: str, d2: str) -> Optional[int]:
-    a, b = _parse_dmy(d1), _parse_dmy(d2)
+def _pay_lag_days(invoice_date: str, payment_date: str) -> Optional[int]:
+    """Signed days from invoice to payment. Negative = paid BEFORE the invoice
+    existed, which cannot be the settlement of that invoice."""
+    a, b = _parse_dmy(invoice_date), _parse_dmy(payment_date)
     if a is None or b is None:
         return None
-    return abs((a - b).days)
+    return (b - a).days
+
+
+def _lag_grade(lag: Optional[int]) -> str:
+    if lag is not None and 0 <= lag <= MATCH_WINDOW_DAYS:
+        return LEDGER_GREEN
+    return LEDGER_YELLOW
+
+
+def _lag_text(lag: Optional[int]) -> str:
+    if lag is None:
+        return "dates unreadable"
+    if lag < 0:
+        return f"paid {-lag} days before the invoice"
+    return f"{lag} days"
 
 
 def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
@@ -591,14 +608,15 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
         status[id(t)] = (st, note)
 
     for inv, pay in result.matched_pairs:
-        days = _days_apart(inv.date, pay.date)
-        if days is not None and days <= MATCH_WINDOW_DAYS:
-            mark(inv, LEDGER_GREEN, f"paired with {pay.reference or 'payment'} ({days} days)")
-            mark(pay, LEDGER_GREEN, f"paired with {inv.reference or 'invoice'} ({days} days)")
+        lag = _pay_lag_days(inv.date, pay.date)
+        grade = _lag_grade(lag)
+        if grade == LEDGER_GREEN:
+            mark(inv, grade, f"paired with {pay.reference or 'payment'} ({_lag_text(lag)})")
+            mark(pay, grade, f"paired with {inv.reference or 'invoice'} ({_lag_text(lag)})")
         else:
-            gap = "dates unreadable" if days is None else f"{days} days apart"
-            mark(inv, LEDGER_YELLOW, f"same amount as {pay.reference or 'payment'} ({gap})")
-            mark(pay, LEDGER_YELLOW, f"same amount as {inv.reference or 'invoice'} ({gap})")
+            gap = _lag_text(lag) if lag is None or lag < 0 else f"{lag} days apart"
+            mark(inv, grade, f"same amount as {pay.reference or 'payment'} ({gap})")
+            mark(pay, grade, f"same amount as {inv.reference or 'invoice'} ({gap})")
 
     for tp in result.typos:
         d = f"diff R{abs(tp.diff_cents) / 100:.2f}"
@@ -606,23 +624,25 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
         mark(tp.payment, LEDGER_YELLOW, f"near amount {tp.invoice.reference or '-'} ({d})")
 
     for cm in result.combinations:
-        spans = [_days_apart(cm.target.date, p.date) for p in cm.parts]
-        within = all(s is not None and s <= MATCH_WINDOW_DAYS for s in spans)
-        st = LEDGER_GREEN if within else LEDGER_YELLOW
+        # target_side 'payment': one payment covers N invoices; 'invoice': reversed.
+        if cm.target_side == "payment":
+            lags = [_pay_lag_days(p.date, cm.target.date) for p in cm.parts]
+        else:
+            lags = [_pay_lag_days(cm.target.date, p.date) for p in cm.parts]
+        st = LEDGER_GREEN if all(_lag_grade(l) == LEDGER_GREEN for l in lags) else LEDGER_YELLOW
         refs = " + ".join(p.reference or "-" for p in cm.parts)
         mark(cm.target, st, f"combination of {refs}")
         for p in cm.parts:
             mark(p, st, f"part of combination for {cm.target.reference or '-'}")
 
     for t, s in result.settled_items:
-        if t.credit:
-            other_sup, other_ref, other_date = s.payment_supplier, s.payment_ref, s.payment_date
-        else:
-            other_sup, other_ref, other_date = s.invoice_supplier, s.invoice_ref, s.invoice_date
-        days = _days_apart(t.date, other_date)
-        st = LEDGER_GREEN if days is not None and days <= MATCH_WINDOW_DAYS else LEDGER_YELLOW
-        gap = "dates unreadable" if days is None else f"{days} days"
-        mark(t, st, f"cross-account {other_sup} {other_ref or '-'} ({gap})")
+        if t.credit:   # this row is the invoice; counterpart is the payment
+            other_sup, other_ref = s.payment_supplier, s.payment_ref
+            lag = _pay_lag_days(t.date, s.payment_date)
+        else:          # this row is the payment; counterpart is the invoice
+            other_sup, other_ref = s.invoice_supplier, s.invoice_ref
+            lag = _pay_lag_days(s.invoice_date, t.date)
+        mark(t, _lag_grade(lag), f"cross-account {other_sup} {other_ref or '-'} ({_lag_text(lag)})")
 
     for t in result.unmatched_invoices:
         mark(t, LEDGER_RED, "no matching payment")
