@@ -17,8 +17,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, LEDGER_GREEN,
-                     LEDGER_RED, LEDGER_YELLOW, CrossSettlement,
+from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, GREEN_EPS,
+                     LEDGER_GREEN, LEDGER_RED, LEDGER_YELLOW, CrossSettlement,
                      CrossSupplierFinding, EngineResult, SupplierResult,
                      ledger_rows)
 from .match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE, MatchResult)
@@ -198,6 +198,9 @@ LEDGER_STYLE = {
     LEDGER_RED: (RED_FILL, RED_FONT, "NO MATCH"),
 }
 
+BREAK_FILL = PatternFill("solid", fgColor="D9D9D9")
+BREAK_FONT = Font(bold=True)
+
 
 def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
     """The source report reproduced in full - every transaction with its date -
@@ -210,12 +213,26 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
     _autosize(ws, headers, {1: 34, 2: 12, 3: 16, 4: 18, 5: 46, 8: 12, 9: 42})
     r = 2
     for res in engine.suppliers:
+        # Supplier break: a full-width gray band with opening/closing balances,
+        # each colored green when R0 / red when not, plus a SETTLED/OPEN badge.
+        for c in range(1, 10):
+            band = ws.cell(row=r, column=c)
+            band.fill, band.font = BREAK_FILL, BREAK_FONT
         hc = _put(ws, r, 1, res.name, text=True)
-        hc.font = Font(bold=True)
-        _put(ws, r, 5, f"opening R{(_rand(res.supplier.opening) or 0):,.2f}, "
-                       f"closing R{(_rand(res.closing) or 0):,.2f}", text=True)
+        hc.fill, hc.font = BREAK_FILL, BREAK_FONT
+        lbl = _put(ws, r, 5, "Opening / Closing balance", text=True)
+        lbl.fill, lbl.font = BREAK_FILL, BREAK_FONT
+        for col, cents in ((6, res.supplier.opening), (7, res.closing)):
+            cell = _put(ws, r, col, _rand(cents), money=True)
+            settled = abs(cents) < GREEN_EPS
+            cell.fill = GREEN_FILL if settled else RED_FILL
+            cell.font = GREEN_FONT if settled else RED_FONT
+        badge = _put(ws, r, 8, "SETTLED" if abs(res.closing) < GREEN_EPS else "OPEN")
+        badge.fill = GREEN_FILL if abs(res.closing) < GREEN_EPS else RED_FILL
+        badge.font = GREEN_FONT if abs(res.closing) < GREEN_EPS else RED_FONT
         if res.notes:
-            _put(ws, r, 9, "; ".join(res.notes), text=True)
+            nc = _put(ws, r, 9, "; ".join(res.notes), text=True)
+            nc.fill, nc.font = BREAK_FILL, BREAK_FONT
         r += 1
         for row in ledger_rows(res):
             t = row.txn
@@ -233,6 +250,7 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
                 sc.fill, sc.font = style[0], style[1]
             _put(ws, r, 9, row.note, text=True)
             r += 1
+        r += 1   # blank spacer row: clean break before the next supplier
 
 
 def _typos_sheet(ws: Worksheet, engine: EngineResult) -> None:

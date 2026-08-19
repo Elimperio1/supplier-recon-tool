@@ -182,23 +182,43 @@ def test_ledger_pair_paid_within_window_after_invoice_is_green():
     assert "7 days" in rows[0].note
 
 
-def test_ledger_pair_paid_long_after_invoice_is_yellow():
-    s = Supplier("W", 0, 0, [_inv_d("W", "I1", 5000, "01/03/2026", 0),
-                             _pay_d("W", "P1", 5000, "20/07/2026", 1)])
+def test_ledger_pair_paid_long_after_invoice_is_yellow_when_account_open():
+    # closing != 0 (account open), so the far-apart pair stays yellow.
+    s = Supplier("W", 0, 5000, [_inv_d("W", "I1", 5000, "01/03/2026", 0),
+                                _pay_d("W", "P1", 5000, "20/07/2026", 1)])
     rows = ledger_rows(analyze_supplier(s))
     assert [r.status for r in rows] == [LEDGER_YELLOW, LEDGER_YELLOW]
     assert "days apart" in rows[0].note
 
 
-def test_ledger_payment_before_invoice_is_never_green():
-    # Paid 7 days BEFORE the invoice: same gap that grades green in the valid
-    # direction must grade yellow here - you cannot pay an invoice that does
-    # not exist yet.
-    s = Supplier("W", 0, 0, [_pay_d("W", "P1", 5000, "01/07/2026", 0),
-                             _inv_d("W", "I1", 5000, "08/07/2026", 1)])
+def test_ledger_payment_before_invoice_is_yellow_when_account_open():
+    # Paid 7 days BEFORE the invoice in an open account: same gap that grades
+    # green in the valid direction must grade yellow - you cannot pay an
+    # invoice that does not exist yet.
+    s = Supplier("W", 0, 5000, [_pay_d("W", "P1", 5000, "01/07/2026", 0),
+                                _inv_d("W", "I1", 5000, "08/07/2026", 1)])
     rows = ledger_rows(analyze_supplier(s))
     assert [r.status for r in rows] == [LEDGER_YELLOW, LEDGER_YELLOW]
     assert "before the invoice" in rows[0].note
+
+
+def test_ledger_zero_balance_confirms_far_apart_pair_green():
+    # Account settles to R0: the zero balance proves the pair is matched, so
+    # a far-apart (or wrong-direction) pair grades green with the anomaly noted.
+    s = Supplier("W", 0, 0, [_inv_d("W", "I1", 5000, "01/03/2026", 0),
+                             _pay_d("W", "P1", 5000, "20/07/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.status for r in rows] == [LEDGER_GREEN, LEDGER_GREEN]
+    assert "account settles to R0" in rows[0].note
+
+
+def test_ledger_zero_balance_confirms_paid_before_pair_green():
+    s = Supplier("W", 0, 0, [_pay_d("W", "P1", 5000, "01/07/2026", 0),
+                             _inv_d("W", "I1", 5000, "08/07/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.status for r in rows] == [LEDGER_GREEN, LEDGER_GREEN]
+    assert "before the invoice" in rows[0].note
+    assert "account settles to R0" in rows[0].note
 
 
 def test_ledger_unmatched_is_red():

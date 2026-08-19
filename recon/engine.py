@@ -18,7 +18,7 @@ from .parse import Supplier, SupplierReport, SupplierTxn
 # Bumped on ANY change to result shapes or matching behavior. app.py uses this
 # both as the st.cache_data salt AND to detect a stale module surviving a
 # Streamlit Cloud redeploy (the process keeps sys.modules across git pushes).
-ENGINE_VERSION = 6
+ENGINE_VERSION = 7
 
 # Classification threshold: |closing| < 1 cent is green.
 GREEN_EPS = 1
@@ -556,6 +556,11 @@ def cross_account_settlements(
 #   yellow - same amount but suspect: paid BEFORE the invoice date, paid too
 #            long after, a near-match typo, or an out-of-window combination
 #   red    - no matching counterpart at all
+# Zero-balance override: when the supplier's closing balance is R0 the account
+# settles in full, which CONFIRMS every amount-pair in it - date anomalies are
+# capture artifacts, not open items - so pairs and combinations grade green
+# with the anomaly kept in the note. Typos stay yellow (amounts differ) and
+# unmatched stay red (no item-level counterpart) even at R0.
 
 MATCH_WINDOW_DAYS = 10
 
@@ -607,6 +612,8 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
     def mark(t: SupplierTxn, st: str, note: str) -> None:
         status[id(t)] = (st, note)
 
+    settles = result.category == CAT_GREEN   # closing R0: the account confirms its pairs
+
     for inv, pay in result.matched_pairs:
         lag = _pay_lag_days(inv.date, pay.date)
         grade = _lag_grade(lag)
@@ -615,8 +622,14 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
             mark(pay, grade, f"paired with {inv.reference or 'invoice'} ({_lag_text(lag)})")
         else:
             gap = _lag_text(lag) if lag is None or lag < 0 else f"{lag} days apart"
-            mark(inv, grade, f"same amount as {pay.reference or 'payment'} ({gap})")
-            mark(pay, grade, f"same amount as {inv.reference or 'invoice'} ({gap})")
+            if settles:
+                mark(inv, LEDGER_GREEN,
+                     f"paired with {pay.reference or 'payment'} ({gap}; account settles to R0)")
+                mark(pay, LEDGER_GREEN,
+                     f"paired with {inv.reference or 'invoice'} ({gap}; account settles to R0)")
+            else:
+                mark(inv, grade, f"same amount as {pay.reference or 'payment'} ({gap})")
+                mark(pay, grade, f"same amount as {inv.reference or 'invoice'} ({gap})")
 
     for tp in result.typos:
         d = f"diff R{abs(tp.diff_cents) / 100:.2f}"
@@ -629,11 +642,13 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
             lags = [_pay_lag_days(p.date, cm.target.date) for p in cm.parts]
         else:
             lags = [_pay_lag_days(cm.target.date, p.date) for p in cm.parts]
-        st = LEDGER_GREEN if all(_lag_grade(l) == LEDGER_GREEN for l in lags) else LEDGER_YELLOW
+        within = all(_lag_grade(l) == LEDGER_GREEN for l in lags)
+        st = LEDGER_GREEN if within or settles else LEDGER_YELLOW
+        confirm = "" if within else "; account settles to R0" if settles else ""
         refs = " + ".join(p.reference or "-" for p in cm.parts)
-        mark(cm.target, st, f"combination of {refs}")
+        mark(cm.target, st, f"combination of {refs}{confirm}")
         for p in cm.parts:
-            mark(p, st, f"part of combination for {cm.target.reference or '-'}")
+            mark(p, st, f"part of combination for {cm.target.reference or '-'}{confirm}")
 
     for t, s in result.settled_items:
         if t.credit:   # this row is the invoice; counterpart is the payment

@@ -29,7 +29,7 @@ import streamlit as st
 # class identity, missing dataclass field, ImportError on a new name). If the
 # in-memory engine's version is not the one this app.py was written against,
 # purge every recon module and re-import fresh.
-_EXPECTED_ENGINE_VERSION = 6
+_EXPECTED_ENGINE_VERSION = 7
 
 import recon.engine as _engine_mod  # noqa: E402
 
@@ -403,9 +403,10 @@ with tabs[0]:
 # ---- Ledger -----------------------------------------------------------------
 with tabs[1]:
     st.markdown('<div class="sec">The full report, every transaction and date, graded: '
-                '<b>green</b> = paid on the invoice date or up to 10 days after · '
-                '<b>yellow</b> = same amount but needs review (paid before the invoice, '
-                'or too long after) · <b>red</b> = no matching counterpart.</div>',
+                '<b>green</b> = paid on the invoice date or up to 10 days after, or the '
+                'account settles to R0 · <b>yellow</b> = same amount but needs review '
+                '(paid before the invoice, or too long after, in an unsettled account) · '
+                '<b>red</b> = no matching counterpart.</div>',
                 unsafe_allow_html=True)
     _names = [r.name for r in engine.suppliers]
     _pick = st.selectbox("Supplier", ["All suppliers"] + _names, key="ledger_pick")
