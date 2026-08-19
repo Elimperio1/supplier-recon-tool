@@ -13,6 +13,7 @@ all default Streamlit chrome (menu, footer, header, sidebar) hidden. No sidebar.
 
 from __future__ import annotations
 
+import hashlib
 import html
 from dataclasses import asdict
 
@@ -283,12 +284,32 @@ supplier_bytes = _load(sup_file)
 bank_bytes = _load(bank_file)
 
 if supplier_bytes is None:
+    st.session_state.pop("run_sig", None)
     st.markdown(
         '<div class="empty"><div class="empty__t">Upload a Supplier Transactions Report to begin</div>'
         '<div class="empty__s">Export both reports from Sage Business Cloud and drop them in above. '
         'The bank report unlocks candidate-payment search.</div></div>',
         unsafe_allow_html=True,
     )
+    st.stop()
+
+# ---- Run control ----------------------------------------------------------
+# Nothing computes until the user clicks Run, so results never appear before they
+# have added the files they want (e.g. the bank report), and adding a file later
+# re-enriches only on request. Keyed on a signature of the uploaded bytes: change
+# a file and the last-run signature no longer matches, so Run must be clicked again.
+_sig = hashlib.md5(supplier_bytes + b"|" + (bank_bytes or b"")).hexdigest()
+_scope = "supplier + bank reports" if bank_bytes is not None else "supplier report only"
+if st.button(f"Run reconciliation  ·  {_scope}", type="primary", width="stretch"):
+    st.session_state["run_sig"] = _sig
+
+if st.session_state.get("run_sig") != _sig:
+    if bank_bytes is None:
+        st.info("Supplier report loaded. Add the Banks & Credit Cards report to enrich the "
+                "Payments Needed search, or click Run reconciliation to run on the supplier "
+                "report alone.")
+    else:
+        st.info("Both reports loaded. Click Run reconciliation to analyse.")
     st.stop()
 
 # ---- Compute --------------------------------------------------------------
