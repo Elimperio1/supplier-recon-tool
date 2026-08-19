@@ -287,6 +287,9 @@ bank_report = _parse_bank(bank_bytes) if bank_bytes is not None else None
 bank_index = account_payment_index(bank_report) if bank_report else {}
 
 refresh = st.session_state.setdefault("alias_refresh", 0)
+_flash = st.session_state.pop("alias_flash", None)
+if _flash:
+    st.toast(_flash)
 aliases = [sheets_mod.AliasRow(**d) for d in _read_aliases(client_status, refresh)]
 manual = _manual_patterns(aliases, client)
 
@@ -306,6 +309,7 @@ tiles([
     ("Green", str(len(greens)), "green"),
     ("Payments needed", str(len(pays)), "red"),
     ("Invoices needed", str(len(invs)), "red"),
+    ("Cross-account", str(len(engine.settlements)), "neutral"),
     ("Integrity issues", str(n_integ), "green" if n_integ == 0 else "red"),
 ])
 
@@ -318,8 +322,8 @@ dcol.download_button(
     width="stretch",
 )
 
-tabs = st.tabs(["Summary", "Payments Needed", "Invoices Needed", "Cross-Supplier",
-                "Capture Typos", "Integrity"])
+tabs = st.tabs(["Summary", "Payments Needed", "Invoices Needed", "Cross-Account",
+                "Cross-Supplier", "Capture Typos", "Integrity"])
 
 # ---- Summary --------------------------------------------------------------
 with tabs[0]:
@@ -419,8 +423,27 @@ with tabs[2]:
     else:
         st.info("No unmatched payments.")
 
-# ---- Cross-Supplier -------------------------------------------------------
+# ---- Cross-Account --------------------------------------------------------
 with tabs[3]:
+    st.markdown('<div class="sec">A <b>needed invoice</b> on one account matched to a '
+                '<b>needed payment</b> on another, by exact amount. <b>Likely same vendor</b> = the '
+                'two names share a distinctive word (e.g. Agrimark / Elgin Agrimark) · '
+                '<b>Amount only</b> = amount matches but names do not - review before acting.</div>',
+                unsafe_allow_html=True)
+    _conf_label = {"name_linked": "Likely same vendor", "amount_only": "Amount only"}
+    srows = [{"Confidence": _conf_label.get(s.confidence, s.confidence),
+              "Invoice Supplier": s.invoice_supplier, "Invoice Ref": s.invoice_ref,
+              "Payment Supplier": s.payment_supplier, "Payment Ref": s.payment_ref,
+              "Amount (R)": s.amount_cents / 100,
+              "Shared": ", ".join(s.evidence)} for s in engine.settlements]
+    if srows:
+        st.dataframe(pd.DataFrame(srows), width="stretch", hide_index=True,
+                     column_config={"Amount (R)": st.column_config.NumberColumn(format="%.2f")})
+    else:
+        st.info("No cross-account matches found.")
+
+# ---- Cross-Supplier -------------------------------------------------------
+with tabs[4]:
     st.markdown('<div class="sec">Duplicate / mis-captured accounts: balance mirrors, item matches, '
                 'and payments that name another supplier. Diagnosis for you, not an auto-merge.</div>',
                 unsafe_allow_html=True)
@@ -434,7 +457,7 @@ with tabs[3]:
         st.info("No cross-supplier findings.")
 
 # ---- Capture Typos --------------------------------------------------------
-with tabs[4]:
+with tabs[5]:
     st.markdown('<div class="sec">Same supplier, amounts within 5 cents - likely a capture typo '
                 '(e.g. 1369.28 vs 1369.26).</div>', unsafe_allow_html=True)
     rows = []
@@ -449,7 +472,7 @@ with tabs[4]:
         st.info("No near-match typos found.")
 
 # ---- Integrity ------------------------------------------------------------
-with tabs[5]:
+with tabs[6]:
     st.markdown('<div class="sec">Recomputed closing (opening + Σcredits - Σdebits) vs reported '
                 'closing, to the cent. Any mismatch is excluded from confident matching.</div>',
                 unsafe_allow_html=True)
@@ -493,6 +516,16 @@ with st.expander("Teach an alias"):
                     client=client.strip(), supplier=a_sup.strip(),
                     alias_pattern=a_pat.strip(), source="manual", notes=a_notes.strip()))
                 st.session_state["alias_refresh"] = refresh + 1
-                st.success("Alias saved" if wrote else "Alias already exists")
+                st.session_state["alias_flash"] = (
+                    "Alias saved - matching re-run with it." if wrote
+                    else "That alias already existed - matching re-run anyway.")
+                st.rerun()
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Could not save: {exc}")
+
+    st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+    st.caption("Edited aliases in the sheet, or just saved one? Re-run reloads them "
+               "and recomputes every match.")
+    if st.button("Re-run matching with latest aliases", key="rerun_match"):
+        st.session_state["alias_refresh"] = refresh + 1
+        st.rerun()

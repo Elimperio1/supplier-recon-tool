@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from recon.parse import parse_supplier_report
+from recon.parse import parse_supplier_report, Supplier, SupplierReport, SupplierTxn
 from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, analyze,
-                          analyze_supplier, classify)
+                          analyze_supplier, classify, cross_account_settlements)
 
 FIX = Path(__file__).parent / "fixtures"
 SUP = FIX / "supplier_traps.csv"
@@ -87,3 +87,51 @@ def test_bulk_account_labeled_not_bruteforced(monkeypatch):
     assert res.bulk is True
     assert res.combinations == []
     assert any("bulk/statement account" in n for n in res.notes)
+
+
+# --- Cross-account settlements (needed-invoice of A <-> needed-payment of B) --
+
+def _invoice(name, ref, cents, ri):
+    return SupplierTxn(name, "01/01/2026", ref, "Supplier Invoice", "", None, cents, "", ri)
+
+
+def _payment(name, ref, cents, ri):
+    return SupplierTxn(name, "01/01/2026", ref, "Supplier Payment", "", cents, None, "", ri)
+
+
+def test_cross_account_name_linked_includes_bulk():
+    # Agrimark (payments needed) has an unpaid invoice; Elgin Agrimark (bulk,
+    # invoices needed) has the matching payment. Shared token AGRIMARK -> name_linked,
+    # and the bulk side must NOT disqualify it.
+    agrimark = Supplier("Agrimark", 0, 176815, [_invoice("Agrimark", "SIV1", 176815, 0)])
+    elgin_debits = [_payment("Elgin Agrimark", f"P{i}", 800000 + i, 10 + i) for i in range(24)]
+    elgin_debits.append(_payment("Elgin Agrimark", "PAY1", 176815, 99))
+    elgin = Supplier("Elgin Agrimark", 0, -1_500_000, elgin_debits)
+
+    settlements = cross_account_settlements(analyze(SupplierReport(suppliers=[agrimark, elgin])).suppliers)
+    hit = [s for s in settlements if s.amount_cents == 176815]
+    assert len(hit) == 1
+    s = hit[0]
+    assert s.confidence == "name_linked"
+    assert s.invoice_supplier == "Agrimark" and s.invoice_ref == "SIV1"
+    assert s.payment_supplier == "Elgin Agrimark" and s.payment_ref == "PAY1"
+    assert "AGRIMARK" in s.evidence
+
+
+def test_cross_account_amount_only_when_no_shared_name():
+    blue = Supplier("Blue Traders", 0, 250000, [_invoice("Blue Traders", "SIV2", 250000, 0)])
+    red = Supplier("Red Holdings", 0, -250000, [_payment("Red Holdings", "PAY2", 250000, 1)])
+    settlements = cross_account_settlements(analyze(SupplierReport(suppliers=[blue, red])).suppliers)
+    hit = [s for s in settlements if s.amount_cents == 250000]
+    assert len(hit) == 1
+    assert hit[0].confidence == "amount_only"
+    assert hit[0].evidence == []
+
+
+def test_cross_account_bulk_without_name_link_is_suppressed():
+    green = Supplier("Green Co", 0, 330000, [_invoice("Green Co", "SIV3", 330000, 0)])
+    stmt_debits = [_payment("Statement House", f"Q{i}", 700000 + i, 10 + i) for i in range(24)]
+    stmt_debits.append(_payment("Statement House", "PAY3", 330000, 99))
+    stmt = Supplier("Statement House", 0, -1_500_000, stmt_debits)
+    settlements = cross_account_settlements(analyze(SupplierReport(suppliers=[green, stmt])).suppliers)
+    assert [s for s in settlements if s.amount_cents == 330000] == []

@@ -17,8 +17,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, CrossSupplierFinding,
-                     EngineResult, SupplierResult)
+from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, CrossSettlement,
+                     CrossSupplierFinding, EngineResult, SupplierResult)
 from .match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE, MatchResult)
 from .parse import BankReport, SupplierReport
 
@@ -162,6 +162,30 @@ def _cross_sheet(ws: Worksheet, findings: Iterable[CrossSupplierFinding]) -> Non
         r += 1
 
 
+SETTLEMENT_LABEL = {"name_linked": "Likely same vendor", "amount_only": "Amount only"}
+SETTLEMENT_STYLE = {"name_linked": (GREEN_FILL, GREEN_FONT), "amount_only": (AMBER_FILL, AMBER_FONT)}
+
+
+def _settlement_sheet(ws: Worksheet, settlements: Iterable[CrossSettlement]) -> None:
+    headers = ["Confidence", "Invoice Supplier", "Invoice Ref", "Payment Supplier",
+               "Payment Ref", "Amount (R)", "Shared"]
+    _header(ws, headers)
+    _autosize(ws, headers, {1: 20, 2: 30, 3: 16, 4: 30, 5: 16, 7: 24})
+    r = 2
+    for s in settlements:
+        cc = _put(ws, r, 1, SETTLEMENT_LABEL.get(s.confidence, s.confidence))
+        fill, font = SETTLEMENT_STYLE.get(s.confidence, (None, None))
+        if fill:
+            cc.fill, cc.font = fill, font
+        _put(ws, r, 2, s.invoice_supplier, text=True)
+        _put(ws, r, 3, s.invoice_ref, text=True)
+        _put(ws, r, 4, s.payment_supplier, text=True)
+        _put(ws, r, 5, s.payment_ref, text=True)
+        _put(ws, r, 6, _rand(s.amount_cents), money=True)
+        _put(ws, r, 7, ", ".join(s.evidence), text=True)
+        r += 1
+
+
 def _typos_sheet(ws: Worksheet, engine: EngineResult) -> None:
     headers = ["Supplier", "Invoice Ref", "Invoice (R)", "Payment Ref", "Payment (R)", "Diff (R)"]
     _header(ws, headers)
@@ -228,6 +252,7 @@ def build_workbook(
     wb.active.title = "Summary"
     _payments_sheet(wb.create_sheet("Payments Needed"), matches, engine)
     _invoices_sheet(wb.create_sheet("Invoices Needed"), engine)
+    _settlement_sheet(wb.create_sheet("Cross-Account"), engine.settlements)
     _cross_sheet(wb.create_sheet("Cross-Supplier"), engine.cross)
     _typos_sheet(wb.create_sheet("Capture Typos"), engine)
     _integrity_sheet(wb.create_sheet("Integrity"), engine, supplier_report, bank_report)

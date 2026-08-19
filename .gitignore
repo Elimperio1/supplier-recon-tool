@@ -8,3 +8,5 @@ __pycache__/
 # and the golden-numbers test; a fresh clone simply skips both.
 *.csv
 !tests/fixtures/*.csv
+# Generated recon workbooks (and any client .xlsx) — regenerated on demand.
+*.xlsx

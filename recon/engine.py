@@ -84,9 +84,23 @@ class CrossSupplierFinding:
 
 
 @dataclass
+class CrossSettlement:
+    """One needed-invoice of supplier A settled by one needed-payment of supplier B
+    (same amount, different accounts) - the Agrimark / Elgin Agrimark case."""
+    invoice_supplier: str
+    invoice_ref: str
+    payment_supplier: str
+    payment_ref: str
+    amount_cents: int
+    confidence: str          # 'name_linked' | 'amount_only'
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass
 class EngineResult:
     suppliers: list[SupplierResult]
     cross: list[CrossSupplierFinding]
+    settlements: list[CrossSettlement] = field(default_factory=list)
 
     def by_category(self, category: str) -> list[SupplierResult]:
         return [r for r in self.suppliers if r.category == category]
@@ -391,10 +405,87 @@ def cross_supplier(results: list[SupplierResult]) -> list[CrossSupplierFinding]:
 
 
 # ---------------------------------------------------------------------------
+# Cross-account settlement pass: needed-invoice of A <-> needed-payment of B
+# ---------------------------------------------------------------------------
+# The "second layer": an invoice sitting unpaid on one account may have been
+# settled by a payment booked to another account (same real vendor split across
+# two accounts, e.g. Agrimark / Elgin Agrimark; or a payment mis-allocated to the
+# wrong supplier). Two tiers, both exact-amount:
+#   * name_linked - the two names share a distinctive token. Trusted enough to
+#     include bulk/statement accounts (whose hundreds of amounts would otherwise
+#     collide with everything by chance).
+#   * amount_only - exact amount, no shared name. Non-bulk both sides, and the
+#     amount must be uncommon (<= MAX_AMOUNT_DF suppliers carry it) or it is
+#     suppressed as round-number noise.
+# Each invoice and payment is offered at most once; the name_linked pass runs
+# first so a strong match is never pre-empted by a coincidental amount-only one.
+
+MAX_AMOUNT_DF = 2        # an amount held by more suppliers than this is "common"
+
+
+def cross_account_settlements(results: list["SupplierResult"]) -> list[CrossSettlement]:
+    reds = [r for r in results if r.category != CAT_GREEN]
+    df = _name_token_df(results)
+
+    def distinctive(name: str) -> set[str]:
+        return {t for t in name_tokens(name) if len(t) >= MIN_REF_LEN and df.get(t, 0) <= MAX_NAME_DF}
+
+    def shared(a: SupplierResult, b: SupplierResult) -> list[str]:
+        ev = (set(a.evidence_tokens) & distinctive(b.name)) | (set(b.evidence_tokens) & distinctive(a.name))
+        return sorted(ev)
+
+    inv_by_amt: dict[int, list[tuple[SupplierResult, SupplierTxn]]] = {}
+    amt_suppliers: dict[int, set[str]] = {}
+    for r in reds:
+        for t in r.unmatched_invoices:
+            inv_by_amt.setdefault(t.credit, []).append((r, t))
+            amt_suppliers.setdefault(t.credit, set()).add(r.name)
+        for t in r.unmatched_payments:
+            amt_suppliers.setdefault(t.debit, set()).add(r.name)
+
+    used_inv: set[int] = set()
+    used_pay: set[int] = set()
+    out: list[CrossSettlement] = []
+
+    def run(name_linked_only: bool) -> None:
+        for b in reds:
+            for pay in b.unmatched_payments:
+                if id(pay) in used_pay:
+                    continue
+                for a, inv in inv_by_amt.get(pay.debit, []):
+                    if a.name == b.name or id(inv) in used_inv:
+                        continue
+                    ev = shared(a, b)
+                    if name_linked_only:
+                        if not ev:
+                            continue
+                    else:
+                        if ev or a.bulk or b.bulk:
+                            continue
+                        if len(amt_suppliers.get(pay.debit, set())) > MAX_AMOUNT_DF:
+                            continue
+                    used_inv.add(id(inv))
+                    used_pay.add(id(pay))
+                    out.append(CrossSettlement(
+                        invoice_supplier=a.name, invoice_ref=inv.reference,
+                        payment_supplier=b.name, payment_ref=pay.reference,
+                        amount_cents=pay.debit,
+                        confidence="name_linked" if ev else "amount_only",
+                        evidence=ev,
+                    ))
+                    break
+
+    run(name_linked_only=True)
+    run(name_linked_only=False)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Top-level
 # ---------------------------------------------------------------------------
 
 def analyze(report: SupplierReport) -> EngineResult:
     results = [analyze_supplier(s) for s in report.suppliers]
     cross = cross_supplier(results)
-    return EngineResult(suppliers=results, cross=cross)
+    settlements = cross_account_settlements(results)
+    return EngineResult(suppliers=results, cross=cross, settlements=settlements)
