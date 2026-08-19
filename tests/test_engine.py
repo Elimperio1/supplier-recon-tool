@@ -3,8 +3,9 @@
 from pathlib import Path
 
 from recon.parse import parse_supplier_report, Supplier, SupplierReport, SupplierTxn
-from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, analyze,
-                          analyze_supplier, classify, cross_account_settlements)
+from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, LEDGER_GREEN,
+                          LEDGER_RED, LEDGER_YELLOW, analyze, analyze_supplier,
+                          classify, cross_account_settlements, ledger_rows)
 
 FIX = Path(__file__).parent / "fixtures"
 SUP = FIX / "supplier_traps.csv"
@@ -145,6 +146,53 @@ def test_cross_account_bulk_without_name_link_is_suppressed():
     stmt = Supplier("Statement House", 0, -1_500_000, stmt_debits)
     eng = analyze(SupplierReport(suppliers=[green, stmt]))
     assert [s for s in eng.settlements if s.amount_cents == 330000] == []
+
+
+# --- Ledger grading (green <= 10 days, yellow otherwise, red unmatched) ------
+
+def _inv_d(name, ref, cents, date, ri):
+    return SupplierTxn(name, date, ref, "Supplier Invoice", "", None, cents, "", ri)
+
+
+def _pay_d(name, ref, cents, date, ri):
+    return SupplierTxn(name, date, ref, "Supplier Payment", "", cents, None, "", ri)
+
+
+def test_ledger_pair_within_window_is_green():
+    s = Supplier("W", 0, 0, [_pay_d("W", "P1", 5000, "01/07/2026", 0),
+                             _inv_d("W", "I1", 5000, "08/07/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.status for r in rows] == [LEDGER_GREEN, LEDGER_GREEN]
+    assert "7 days" in rows[0].note
+
+
+def test_ledger_pair_outside_window_is_yellow():
+    s = Supplier("W", 0, 0, [_pay_d("W", "P1", 5000, "01/03/2026", 0),
+                             _inv_d("W", "I1", 5000, "20/07/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.status for r in rows] == [LEDGER_YELLOW, LEDGER_YELLOW]
+    assert "days apart" in rows[0].note
+
+
+def test_ledger_unmatched_is_red():
+    s = Supplier("W", 0, 7000, [_inv_d("W", "I1", 7000, "01/07/2026", 0)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert rows[0].status == LEDGER_RED
+    assert rows[0].note == "no matching payment"
+
+
+def test_ledger_cross_settled_graded_by_dates():
+    agrimark = Supplier("Agrimark", 0, 176815,
+                        [_inv_d("Agrimark", "SIV1", 176815, "01/07/2026", 0)])
+    elgin = Supplier("Elgin Agrimark", 0, -176815,
+                     [_pay_d("Elgin Agrimark", "PAY1", 176815, "03/07/2026", 1)])
+    eng = analyze(SupplierReport(suppliers=[agrimark, elgin]))
+    ag_rows = ledger_rows(eng.get("Agrimark"))
+    assert ag_rows[0].status == LEDGER_GREEN
+    assert "cross-account Elgin Agrimark PAY1" in ag_rows[0].note
+    # settlement carries both dates for display
+    assert eng.settlements[0].invoice_date == "01/07/2026"
+    assert eng.settlements[0].payment_date == "03/07/2026"
 
 
 def test_cross_account_taught_alias_links_unrelated_names():

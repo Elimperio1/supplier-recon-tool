@@ -20,7 +20,9 @@ from dataclasses import asdict
 import pandas as pd
 import streamlit as st
 
-from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, EngineResult, analyze)
+from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, LEDGER_GREEN,
+                          LEDGER_RED, LEDGER_YELLOW, EngineResult, analyze,
+                          ledger_rows)
 from recon.match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE,
                          account_payment_index, match_supplier)
 from recon.parse import (BankReport, SupplierReport, parse_bank_report,
@@ -192,7 +194,7 @@ def rand(cents) -> str:
 # as an argument means bumping it changes the cache key and bypasses stale entries.
 # BUMP THIS whenever SupplierReport / BankReport / EngineResult (or anything they
 # nest) changes shape, OR when engine behavior changes what a cached result holds.
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 
 
 @st.cache_data(show_spinner=False)
@@ -359,8 +361,8 @@ dcol.download_button(
     width="stretch",
 )
 
-tabs = st.tabs(["Summary", "Payments Needed", "Invoices Needed", "Cross-Account",
-                "Cross-Supplier", "Capture Typos", "Integrity"])
+tabs = st.tabs(["Summary", "Ledger", "Payments Needed", "Invoices Needed",
+                "Cross-Account", "Cross-Supplier", "Capture Typos", "Integrity"])
 
 # ---- Summary --------------------------------------------------------------
 with tabs[0]:
@@ -378,8 +380,47 @@ with tabs[0]:
     st.dataframe(df, width="stretch", hide_index=True,
                  column_config={"Closing (R)": st.column_config.NumberColumn(format="%.2f")})
 
-# ---- Payments Needed ------------------------------------------------------
+# ---- Ledger -----------------------------------------------------------------
 with tabs[1]:
+    st.markdown('<div class="sec">The full report, every transaction and date, graded: '
+                '<b>green</b> = matched within 10 days · <b>yellow</b> = same amount but '
+                'needs review · <b>red</b> = no matching counterpart.</div>',
+                unsafe_allow_html=True)
+    _names = [r.name for r in engine.suppliers]
+    _pick = st.selectbox("Supplier", ["All suppliers"] + _names, key="ledger_pick")
+    _shown = engine.suppliers if _pick == "All suppliers" else [engine.get(_pick)]
+    lrows = []
+    for res in _shown:
+        for row in ledger_rows(res):
+            t = row.txn
+            lrows.append({
+                "Supplier": res.name, "Date": t.date, "Reference": t.reference,
+                "Type": t.txn_type, "Description": t.description,
+                "Debit (R)": None if t.debit is None else t.debit / 100,
+                "Credit (R)": None if t.credit is None else t.credit / 100,
+                "Status": {LEDGER_GREEN: "MATCHED", LEDGER_YELLOW: "CHECK",
+                           LEDGER_RED: "NO MATCH"}.get(row.status, ""),
+                "Match": row.note,
+            })
+    if lrows:
+        _ldf = pd.DataFrame(lrows)
+        _colors = {"MATCHED": "background-color:#d7f0dd", "CHECK": "background-color:#fdf0c8",
+                   "NO MATCH": "background-color:#fadadd"}
+
+        def _row_style(row):
+            css = _colors.get(row["Status"], "")
+            return [css] * len(row)
+
+        st.dataframe(_ldf.style.apply(_row_style, axis=1), width="stretch", hide_index=True,
+                     column_config={
+                         "Debit (R)": st.column_config.NumberColumn(format="%.2f"),
+                         "Credit (R)": st.column_config.NumberColumn(format="%.2f"),
+                     })
+    else:
+        st.info("No transactions.")
+
+# ---- Payments Needed ------------------------------------------------------
+with tabs[2]:
     if bank_report is None:
         st.info("Upload the Banks & Credit Cards Report to search for candidate payments.")
     st.markdown('<div class="sec">Unmatched invoices and the bank <b>Account Payments</b> that likely '
@@ -397,12 +438,14 @@ with tabs[1]:
             supplier_mrs = matches.get(res.name, [])
             if not supplier_mrs and bank_report is None:
                 for inv in res.unmatched_invoices:
-                    st.write(f"Invoice **{inv.reference or '-'}** R{rand(inv.credit)}: upload bank file to search.")
+                    st.write(f"Invoice **{inv.reference or '-'}** · {inv.date} · "
+                             f"R{rand(inv.credit)}: upload bank file to search.")
                 continue
 
             for mi, m in enumerate(supplier_mrs):
                 st.markdown(
                     f'<span class="inv">Invoice {esc(m.invoice.reference or "-")} · '
+                    f'{esc(m.invoice.date)} · '
                     f'R{rand(m.amount_cents)}</span>&nbsp;&nbsp;{verdict_pill(m.verdict)}',
                     unsafe_allow_html=True)
                 if m.note:
@@ -445,7 +488,7 @@ with tabs[1]:
                 st.divider()
 
 # ---- Invoices Needed ------------------------------------------------------
-with tabs[2]:
+with tabs[3]:
     st.markdown('<div class="sec">Payments with no matching invoice in the ledger - '
                 'request the invoice from the supplier.</div>', unsafe_allow_html=True)
     rows = []
@@ -461,7 +504,7 @@ with tabs[2]:
         st.info("No unmatched payments.")
 
 # ---- Cross-Account --------------------------------------------------------
-with tabs[3]:
+with tabs[4]:
     st.markdown('<div class="sec">A <b>needed invoice</b> on one account matched to a '
                 '<b>needed payment</b> on another, by exact amount. <b>Likely same vendor</b> = the '
                 'two names share a distinctive word (e.g. Agrimark / Elgin Agrimark) · '
@@ -470,7 +513,9 @@ with tabs[3]:
     _conf_label = {"name_linked": "Likely same vendor", "amount_only": "Amount only"}
     srows = [{"Confidence": _conf_label.get(s.confidence, s.confidence),
               "Invoice Supplier": s.invoice_supplier, "Invoice Ref": s.invoice_ref,
+              "Invoice Date": s.invoice_date,
               "Payment Supplier": s.payment_supplier, "Payment Ref": s.payment_ref,
+              "Payment Date": s.payment_date,
               "Amount (R)": s.amount_cents / 100,
               "Shared": ", ".join(s.evidence)} for s in engine.settlements]
     if srows:
@@ -480,7 +525,7 @@ with tabs[3]:
         st.info("No cross-account matches found.")
 
 # ---- Cross-Supplier -------------------------------------------------------
-with tabs[4]:
+with tabs[5]:
     st.markdown('<div class="sec">Duplicate / mis-captured accounts: balance mirrors, item matches, '
                 'and payments that name another supplier. Diagnosis for you, not an auto-merge.</div>',
                 unsafe_allow_html=True)
@@ -494,14 +539,15 @@ with tabs[4]:
         st.info("No cross-supplier findings.")
 
 # ---- Capture Typos --------------------------------------------------------
-with tabs[5]:
+with tabs[6]:
     st.markdown('<div class="sec">Same supplier, amounts within 5 cents - likely a capture typo '
                 '(e.g. 1369.28 vs 1369.26).</div>', unsafe_allow_html=True)
     rows = []
     for res in engine.suppliers:
         for tp in res.typos:
             rows.append({"Supplier": res.name, "Invoice Ref": tp.invoice.reference,
-                         "Invoice (R)": tp.invoice.credit / 100, "Payment Ref": tp.payment.reference,
+                         "Invoice Date": tp.invoice.date, "Invoice (R)": tp.invoice.credit / 100,
+                         "Payment Ref": tp.payment.reference, "Payment Date": tp.payment.date,
                          "Payment (R)": tp.payment.debit / 100, "Diff (R)": tp.diff_cents / 100})
     if rows:
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
@@ -509,7 +555,7 @@ with tabs[5]:
         st.info("No near-match typos found.")
 
 # ---- Integrity ------------------------------------------------------------
-with tabs[6]:
+with tabs[7]:
     st.markdown('<div class="sec">Recomputed closing (opening + Σcredits - Σdebits) vs reported '
                 'closing, to the cent. Any mismatch is excluded from confident matching.</div>',
                 unsafe_allow_html=True)

@@ -17,8 +17,10 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, CrossSettlement,
-                     CrossSupplierFinding, EngineResult, SupplierResult)
+from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, LEDGER_GREEN,
+                     LEDGER_RED, LEDGER_YELLOW, CrossSettlement,
+                     CrossSupplierFinding, EngineResult, SupplierResult,
+                     ledger_rows)
 from .match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE, MatchResult)
 from .parse import BankReport, SupplierReport
 
@@ -98,16 +100,17 @@ def _summary_sheet(ws: Worksheet, engine: EngineResult) -> None:
 
 def _payments_sheet(ws: Worksheet, matches: dict[str, list[MatchResult]],
                     engine: EngineResult) -> None:
-    headers = ["Supplier", "Invoice Ref", "Amount (R)", "Verdict", "Bank Account",
-               "Bank Date", "Bank Description", "Bank Ref", "Current GL", "Evidence", "Note"]
+    headers = ["Supplier", "Invoice Ref", "Invoice Date", "Amount (R)", "Verdict",
+               "Bank Account", "Bank Date", "Bank Description", "Bank Ref",
+               "Current GL", "Evidence", "Note"]
     _header(ws, headers)
-    _autosize(ws, headers, {1: 30, 2: 16, 4: 12, 5: 16, 6: 12, 7: 40, 8: 16, 9: 26, 10: 20, 11: 40})
+    _autosize(ws, headers, {1: 30, 2: 16, 3: 13, 5: 12, 6: 16, 7: 12, 8: 40, 9: 16, 10: 26, 11: 20, 12: 40})
     r = 2
     for res in engine.by_category(CAT_PAYMENTS):
         if res.bulk:
             _put(ws, r, 1, res.name, text=True)
-            _put(ws, r, 4, "BULK")
-            _put(ws, r, 11, "; ".join(res.notes), text=True)
+            _put(ws, r, 5, "BULK")
+            _put(ws, r, 12, "; ".join(res.notes), text=True)
             r += 1
             continue
         for m in matches.get(res.name, []):
@@ -116,19 +119,20 @@ def _payments_sheet(ws: Worksheet, matches: dict[str, list[MatchResult]],
             for i, cand in enumerate(cands):
                 _put(ws, r, 1, res.name if i == 0 else "", text=True)
                 _put(ws, r, 2, m.invoice.reference if i == 0 else "", text=True)
-                _put(ws, r, 3, _rand(m.amount_cents) if i == 0 else None, money=True)
-                vc = _put(ws, r, 4, m.verdict.upper() if i == 0 else "")
+                _put(ws, r, 3, m.invoice.date if i == 0 else "", text=True)
+                _put(ws, r, 4, _rand(m.amount_cents) if i == 0 else None, money=True)
+                vc = _put(ws, r, 5, m.verdict.upper() if i == 0 else "")
                 if i == 0 and fill:
                     vc.fill, vc.font = fill, font
                 if cand is not None:
-                    _put(ws, r, 5, cand.txn.account, text=True)
-                    _put(ws, r, 6, cand.txn.date, text=True)
-                    _put(ws, r, 7, cand.txn.description, text=True)
-                    _put(ws, r, 8, cand.txn.reference, text=True)
-                    _put(ws, r, 9, cand.txn.allocation, text=True)
-                    _put(ws, r, 10, ", ".join(cand.matched_tokens), text=True)
+                    _put(ws, r, 6, cand.txn.account, text=True)
+                    _put(ws, r, 7, cand.txn.date, text=True)
+                    _put(ws, r, 8, cand.txn.description, text=True)
+                    _put(ws, r, 9, cand.txn.reference, text=True)
+                    _put(ws, r, 10, cand.txn.allocation, text=True)
+                    _put(ws, r, 11, ", ".join(cand.matched_tokens), text=True)
                 if i == 0 and m.note:
-                    _put(ws, r, 11, m.note, text=True)
+                    _put(ws, r, 12, m.note, text=True)
                 r += 1
 
 
@@ -167,10 +171,10 @@ SETTLEMENT_STYLE = {"name_linked": (GREEN_FILL, GREEN_FONT), "amount_only": (AMB
 
 
 def _settlement_sheet(ws: Worksheet, settlements: Iterable[CrossSettlement]) -> None:
-    headers = ["Confidence", "Invoice Supplier", "Invoice Ref", "Payment Supplier",
-               "Payment Ref", "Amount (R)", "Shared"]
+    headers = ["Confidence", "Invoice Supplier", "Invoice Ref", "Invoice Date",
+               "Payment Supplier", "Payment Ref", "Payment Date", "Amount (R)", "Shared"]
     _header(ws, headers)
-    _autosize(ws, headers, {1: 20, 2: 30, 3: 16, 4: 30, 5: 16, 7: 24})
+    _autosize(ws, headers, {1: 20, 2: 30, 3: 16, 4: 13, 5: 30, 6: 16, 7: 13, 9: 24})
     r = 2
     for s in settlements:
         cc = _put(ws, r, 1, SETTLEMENT_LABEL.get(s.confidence, s.confidence))
@@ -179,26 +183,73 @@ def _settlement_sheet(ws: Worksheet, settlements: Iterable[CrossSettlement]) -> 
             cc.fill, cc.font = fill, font
         _put(ws, r, 2, s.invoice_supplier, text=True)
         _put(ws, r, 3, s.invoice_ref, text=True)
-        _put(ws, r, 4, s.payment_supplier, text=True)
-        _put(ws, r, 5, s.payment_ref, text=True)
-        _put(ws, r, 6, _rand(s.amount_cents), money=True)
-        _put(ws, r, 7, ", ".join(s.evidence), text=True)
+        _put(ws, r, 4, s.invoice_date, text=True)
+        _put(ws, r, 5, s.payment_supplier, text=True)
+        _put(ws, r, 6, s.payment_ref, text=True)
+        _put(ws, r, 7, s.payment_date, text=True)
+        _put(ws, r, 8, _rand(s.amount_cents), money=True)
+        _put(ws, r, 9, ", ".join(s.evidence), text=True)
         r += 1
 
 
-def _typos_sheet(ws: Worksheet, engine: EngineResult) -> None:
-    headers = ["Supplier", "Invoice Ref", "Invoice (R)", "Payment Ref", "Payment (R)", "Diff (R)"]
+LEDGER_STYLE = {
+    LEDGER_GREEN: (GREEN_FILL, GREEN_FONT, "MATCHED"),
+    LEDGER_YELLOW: (AMBER_FILL, AMBER_FONT, "CHECK"),
+    LEDGER_RED: (RED_FILL, RED_FONT, "NO MATCH"),
+}
+
+
+def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
+    """The source report reproduced in full - every transaction with its date -
+    each row graded: green = matched within 10 days, yellow = same amount but
+    needs review (far apart / near-miss / combination), red = no counterpart."""
+    headers = ["Supplier", "Date", "Reference", "Type", "Description",
+               "Debit (R)", "Credit (R)", "Status", "Match"]
     _header(ws, headers)
-    _autosize(ws, headers, {1: 30, 2: 16, 4: 16})
+    _autosize(ws, headers, {1: 34, 2: 12, 3: 16, 4: 18, 5: 46, 8: 12, 9: 42})
+    r = 2
+    for res in engine.suppliers:
+        hc = _put(ws, r, 1, res.name, text=True)
+        hc.font = Font(bold=True)
+        _put(ws, r, 5, f"opening R{(_rand(res.supplier.opening) or 0):,.2f}, "
+                       f"closing R{(_rand(res.closing) or 0):,.2f}", text=True)
+        if res.notes:
+            _put(ws, r, 9, "; ".join(res.notes), text=True)
+        r += 1
+        for row in ledger_rows(res):
+            t = row.txn
+            _put(ws, r, 2, t.date, text=True)
+            _put(ws, r, 3, t.reference, text=True)
+            _put(ws, r, 4, t.txn_type, text=True)
+            _put(ws, r, 5, t.description, text=True)
+            style = LEDGER_STYLE.get(row.status)
+            for col, cents in ((6, t.debit), (7, t.credit)):
+                cell = _put(ws, r, col, _rand(cents), money=True)
+                if style and cents is not None:
+                    cell.fill, cell.font = style[0], style[1]
+            if style:
+                sc = _put(ws, r, 8, style[2])
+                sc.fill, sc.font = style[0], style[1]
+            _put(ws, r, 9, row.note, text=True)
+            r += 1
+
+
+def _typos_sheet(ws: Worksheet, engine: EngineResult) -> None:
+    headers = ["Supplier", "Invoice Ref", "Invoice Date", "Invoice (R)",
+               "Payment Ref", "Payment Date", "Payment (R)", "Diff (R)"]
+    _header(ws, headers)
+    _autosize(ws, headers, {1: 30, 2: 16, 3: 13, 5: 16, 6: 13})
     r = 2
     for res in engine.suppliers:
         for tp in res.typos:
             _put(ws, r, 1, res.name, text=True)
             _put(ws, r, 2, tp.invoice.reference, text=True)
-            _put(ws, r, 3, _rand(tp.invoice.credit), money=True)
-            _put(ws, r, 4, tp.payment.reference, text=True)
-            _put(ws, r, 5, _rand(tp.payment.debit), money=True)
-            _put(ws, r, 6, _rand(tp.diff_cents), money=True)
+            _put(ws, r, 3, tp.invoice.date, text=True)
+            _put(ws, r, 4, _rand(tp.invoice.credit), money=True)
+            _put(ws, r, 5, tp.payment.reference, text=True)
+            _put(ws, r, 6, tp.payment.date, text=True)
+            _put(ws, r, 7, _rand(tp.payment.debit), money=True)
+            _put(ws, r, 8, _rand(tp.diff_cents), money=True)
             r += 1
 
 
@@ -250,6 +301,7 @@ def build_workbook(
     wb = Workbook()
     _summary_sheet(wb.active, engine)
     wb.active.title = "Summary"
+    _ledger_sheet(wb.create_sheet("Ledger"), engine)
     _payments_sheet(wb.create_sheet("Payments Needed"), matches, engine)
     _invoices_sheet(wb.create_sheet("Invoices Needed"), engine)
     _settlement_sheet(wb.create_sheet("Cross-Account"), engine.settlements)
