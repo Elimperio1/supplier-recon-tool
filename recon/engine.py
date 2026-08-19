@@ -15,6 +15,11 @@ from typing import Optional
 from .aliases import derive_supplier_aliases, manual_alias_evidence, name_tokens, squash
 from .parse import Supplier, SupplierReport, SupplierTxn
 
+# Bumped on ANY change to result shapes or matching behavior. app.py uses this
+# both as the st.cache_data salt AND to detect a stale module surviving a
+# Streamlit Cloud redeploy (the process keeps sys.modules across git pushes).
+ENGINE_VERSION = 5
+
 # Classification threshold: |closing| < 1 cent is green.
 GREEN_EPS = 1
 # Near-match (capture typo) tolerance, cents. R1.00: wide enough to catch real

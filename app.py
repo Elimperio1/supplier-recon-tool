@@ -15,14 +15,33 @@ from __future__ import annotations
 
 import hashlib
 import html
+import importlib
+import sys
 from dataclasses import asdict
 
 import pandas as pd
 import streamlit as st
 
-from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, LEDGER_GREEN,
-                          LEDGER_RED, LEDGER_YELLOW, EngineResult, analyze,
-                          ledger_rows)
+# ---- Stale-module guard (Streamlit Cloud) -----------------------------------
+# Cloud keeps the server process across git-push redeploys: this script re-runs
+# with NEW code while previously imported modules survive in sys.modules with
+# OLD code. That skew has produced three distinct crashes here (unpicklable
+# class identity, missing dataclass field, ImportError on a new name). If the
+# in-memory engine's version is not the one this app.py was written against,
+# purge every recon module and re-import fresh.
+_EXPECTED_ENGINE_VERSION = 5
+
+import recon.engine as _engine_mod  # noqa: E402
+
+if getattr(_engine_mod, "ENGINE_VERSION", None) != _EXPECTED_ENGINE_VERSION:
+    for _m in [m for m in list(sys.modules) if m == "recon" or m.startswith("recon.")]:
+        sys.modules.pop(_m, None)
+    importlib.invalidate_caches()
+    import recon.engine as _engine_mod  # noqa: E402  (fresh copy)
+
+from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, ENGINE_VERSION,
+                          LEDGER_GREEN, LEDGER_RED, LEDGER_YELLOW, EngineResult,
+                          analyze, ledger_rows)
 from recon.match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE,
                          account_payment_index, match_supplier)
 from recon.parse import (BankReport, SupplierReport, parse_bank_report,
@@ -192,9 +211,10 @@ def rand(cents) -> str:
 # field, an entry pickled by the old deploy unpickles WITHOUT it (pickle restores
 # __dict__ directly, skipping field defaults) -> AttributeError. Passing this salt
 # as an argument means bumping it changes the cache key and bypasses stale entries.
-# BUMP THIS whenever SupplierReport / BankReport / EngineResult (or anything they
-# nest) changes shape, OR when engine behavior changes what a cached result holds.
-_CACHE_VERSION = 5
+# Sourced from ENGINE_VERSION (recon/engine.py) - bump it there on any shape or
+# behavior change, and keep _EXPECTED_ENGINE_VERSION at the top of this file in
+# step with it.
+_CACHE_VERSION = ENGINE_VERSION
 
 
 @st.cache_data(show_spinner=False)
