@@ -183,18 +183,29 @@ def rand(cents) -> str:
 # Cached compute (keyed on raw bytes - §6)
 # ===========================================================================
 
+# Cache-busting salt for the functions below. st.cache_data pickles the return
+# value and keys on (function source, args); Streamlit Cloud keeps that cache in
+# memory across a git-push redeploy. So when a cached return dataclass gains a
+# field, an entry pickled by the old deploy unpickles WITHOUT it (pickle restores
+# __dict__ directly, skipping field defaults) -> AttributeError. Passing this salt
+# as an argument means bumping it changes the cache key and bypasses stale entries.
+# BUMP THIS whenever SupplierReport / BankReport / EngineResult (or anything they
+# nest) changes shape.
+_CACHE_VERSION = 2
+
+
 @st.cache_data(show_spinner=False)
-def _parse_supplier(data: bytes) -> SupplierReport:
+def _parse_supplier(data: bytes, version: int) -> SupplierReport:
     return parse_supplier_report(data)
 
 
 @st.cache_data(show_spinner=False)
-def _parse_bank(data: bytes) -> BankReport:
+def _parse_bank(data: bytes, version: int) -> BankReport:
     return parse_bank_report(data)
 
 
 @st.cache_data(show_spinner=False)
-def _analyze(supplier_bytes: bytes) -> EngineResult:
+def _analyze(supplier_bytes: bytes, version: int) -> EngineResult:
     return analyze(parse_supplier_report(supplier_bytes))
 
 
@@ -281,9 +292,9 @@ if supplier_bytes is None:
     st.stop()
 
 # ---- Compute --------------------------------------------------------------
-supplier_report = _parse_supplier(supplier_bytes)
-engine = _analyze(supplier_bytes)
-bank_report = _parse_bank(bank_bytes) if bank_bytes is not None else None
+supplier_report = _parse_supplier(supplier_bytes, _CACHE_VERSION)
+engine = _analyze(supplier_bytes, _CACHE_VERSION)
+bank_report = _parse_bank(bank_bytes, _CACHE_VERSION) if bank_bytes is not None else None
 bank_index = account_payment_index(bank_report) if bank_report else {}
 
 refresh = st.session_state.setdefault("alias_refresh", 0)
