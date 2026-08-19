@@ -11,7 +11,7 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .aliases import derive_supplier_aliases, name_tokens
+from .aliases import derive_supplier_aliases, manual_alias_evidence, name_tokens, squash
 from .parse import Supplier, SupplierReport, SupplierTxn
 
 # Classification threshold: |closing| < 1 cent is green.
@@ -419,20 +419,46 @@ def cross_supplier(results: list[SupplierResult]) -> list[CrossSupplierFinding]:
 #     suppressed as round-number noise.
 # Each invoice and payment is offered at most once; the name_linked pass runs
 # first so a strong match is never pre-empted by a coincidental amount-only one.
+#
+# name_linked settlements CONSUME their items - like the typo and combination
+# passes, the matched invoice/payment leaves the unmatched (needed) lists so the
+# same item never fires on both Payments Needed and Invoices Needed. Never
+# silent: the pair is recorded as a settlement and both suppliers get a note.
+# amount_only is surfaced but NOT consumed - not confident enough to clear a
+# needed list on its own.
 
 MAX_AMOUNT_DF = 2        # an amount held by more suppliers than this is "common"
 
+CROSS_SETTLED_NOTE = "{n} item(s) settled cross-account with {other} - see Cross-Account"
 
-def cross_account_settlements(results: list["SupplierResult"]) -> list[CrossSettlement]:
+
+def cross_account_settlements(
+    results: list["SupplierResult"],
+    manual_patterns: Optional[dict[str, list[str]]] = None,
+) -> list[CrossSettlement]:
     reds = [r for r in results if r.category != CAT_GREEN]
     df = _name_token_df(results)
+    manual_patterns = manual_patterns or {}
 
     def distinctive(name: str) -> set[str]:
         return {t for t in name_tokens(name) if len(t) >= MIN_REF_LEN and df.get(t, 0) <= MAX_NAME_DF}
 
+    def alias_link(a: SupplierResult, b: SupplierResult) -> set[str]:
+        """Taught aliases as same-vendor evidence: a pattern saved for supplier X
+        that reaches Y's *name* links the two accounts (e.g. teach Agrimark the
+        alias "Elgin Agrimark"). Human-chosen, so no document-frequency gate -
+        just a length floor so a tiny pattern can't link everything."""
+        hits: set[str] = set()
+        for x, y in ((a, b), (b, a)):
+            hay = squash(y.name)
+            for pat in manual_patterns.get(x.name, []):
+                hits.update(t for t in manual_alias_evidence(pat)
+                            if len(t) >= MIN_REF_LEN and t in hay)
+        return hits
+
     def shared(a: SupplierResult, b: SupplierResult) -> list[str]:
         ev = (set(a.evidence_tokens) & distinctive(b.name)) | (set(b.evidence_tokens) & distinctive(a.name))
-        return sorted(ev)
+        return sorted(ev | alias_link(a, b))
 
     inv_by_amt: dict[int, list[tuple[SupplierResult, SupplierTxn]]] = {}
     amt_suppliers: dict[int, set[str]] = {}
@@ -446,6 +472,8 @@ def cross_account_settlements(results: list["SupplierResult"]) -> list[CrossSett
     used_inv: set[int] = set()
     used_pay: set[int] = set()
     out: list[CrossSettlement] = []
+    # (invoice-side result, invoice, payment-side result, payment) - name_linked only
+    consumed: list[tuple[SupplierResult, SupplierTxn, SupplierResult, SupplierTxn]] = []
 
     def run(name_linked_only: bool) -> None:
         for b in reds:
@@ -466,6 +494,8 @@ def cross_account_settlements(results: list["SupplierResult"]) -> list[CrossSett
                             continue
                     used_inv.add(id(inv))
                     used_pay.add(id(pay))
+                    if name_linked_only:
+                        consumed.append((a, inv, b, pay))
                     out.append(CrossSettlement(
                         invoice_supplier=a.name, invoice_ref=inv.reference,
                         payment_supplier=b.name, payment_ref=pay.reference,
@@ -477,6 +507,24 @@ def cross_account_settlements(results: list["SupplierResult"]) -> list[CrossSett
 
     run(name_linked_only=True)
     run(name_linked_only=False)
+
+    # Consume name_linked items out of the needed lists (never silent: recorded
+    # above, and noted on both suppliers below). Residuals are recomputed so the
+    # remaining imbalance reflects only genuinely unexplained items.
+    if consumed:
+        gone = {id(inv) for _, inv, _, _ in consumed} | {id(pay) for _, _, _, pay in consumed}
+        counterparts: dict[int, tuple[SupplierResult, dict[str, int]]] = {}
+        for a, _inv, b, _pay in consumed:
+            for r, other in ((a, b.name), (b, a.name)):
+                entry = counterparts.setdefault(id(r), (r, {}))
+                entry[1][other] = entry[1].get(other, 0) + 1
+        for r, per_other in counterparts.values():
+            r.unmatched_invoices = [t for t in r.unmatched_invoices if id(t) not in gone]
+            r.unmatched_payments = [t for t in r.unmatched_payments if id(t) not in gone]
+            r.residual_cents = (sum(t.credit for t in r.unmatched_invoices)
+                                - sum(t.debit for t in r.unmatched_payments))
+            for other, n in sorted(per_other.items()):
+                r.notes.append(CROSS_SETTLED_NOTE.format(n=n, other=other))
     return out
 
 
@@ -484,8 +532,9 @@ def cross_account_settlements(results: list["SupplierResult"]) -> list[CrossSett
 # Top-level
 # ---------------------------------------------------------------------------
 
-def analyze(report: SupplierReport) -> EngineResult:
+def analyze(report: SupplierReport,
+            manual_patterns: Optional[dict[str, list[str]]] = None) -> EngineResult:
     results = [analyze_supplier(s) for s in report.suppliers]
     cross = cross_supplier(results)
-    settlements = cross_account_settlements(results)
+    settlements = cross_account_settlements(results, manual_patterns)
     return EngineResult(suppliers=results, cross=cross, settlements=settlements)

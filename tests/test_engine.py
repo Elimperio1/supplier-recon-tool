@@ -99,33 +99,43 @@ def _payment(name, ref, cents, ri):
     return SupplierTxn(name, "01/01/2026", ref, "Supplier Payment", "", cents, None, "", ri)
 
 
-def test_cross_account_name_linked_includes_bulk():
+def test_cross_account_name_linked_includes_bulk_and_consumes():
     # Agrimark (payments needed) has an unpaid invoice; Elgin Agrimark (bulk,
     # invoices needed) has the matching payment. Shared token AGRIMARK -> name_linked,
-    # and the bulk side must NOT disqualify it.
+    # the bulk side must NOT disqualify it, and both items leave the needed lists.
     agrimark = Supplier("Agrimark", 0, 176815, [_invoice("Agrimark", "SIV1", 176815, 0)])
     elgin_debits = [_payment("Elgin Agrimark", f"P{i}", 800000 + i, 10 + i) for i in range(24)]
     elgin_debits.append(_payment("Elgin Agrimark", "PAY1", 176815, 99))
     elgin = Supplier("Elgin Agrimark", 0, -1_500_000, elgin_debits)
 
-    settlements = cross_account_settlements(analyze(SupplierReport(suppliers=[agrimark, elgin])).suppliers)
-    hit = [s for s in settlements if s.amount_cents == 176815]
+    eng = analyze(SupplierReport(suppliers=[agrimark, elgin]))
+    hit = [s for s in eng.settlements if s.amount_cents == 176815]
     assert len(hit) == 1
     s = hit[0]
     assert s.confidence == "name_linked"
     assert s.invoice_supplier == "Agrimark" and s.invoice_ref == "SIV1"
     assert s.payment_supplier == "Elgin Agrimark" and s.payment_ref == "PAY1"
     assert "AGRIMARK" in s.evidence
+    # consumed: no longer firing as needed on either side, noted on both, residual updated
+    ag, el = eng.get("Agrimark"), eng.get("Elgin Agrimark")
+    assert all(t.reference != "SIV1" for t in ag.unmatched_invoices)
+    assert all(t.reference != "PAY1" for t in el.unmatched_payments)
+    assert any("settled cross-account" in n for n in ag.notes)
+    assert any("settled cross-account" in n for n in el.notes)
+    assert ag.residual_cents == 0
 
 
-def test_cross_account_amount_only_when_no_shared_name():
+def test_cross_account_amount_only_surfaced_but_not_consumed():
     blue = Supplier("Blue Traders", 0, 250000, [_invoice("Blue Traders", "SIV2", 250000, 0)])
     red = Supplier("Red Holdings", 0, -250000, [_payment("Red Holdings", "PAY2", 250000, 1)])
-    settlements = cross_account_settlements(analyze(SupplierReport(suppliers=[blue, red])).suppliers)
-    hit = [s for s in settlements if s.amount_cents == 250000]
+    eng = analyze(SupplierReport(suppliers=[blue, red]))
+    hit = [s for s in eng.settlements if s.amount_cents == 250000]
     assert len(hit) == 1
     assert hit[0].confidence == "amount_only"
     assert hit[0].evidence == []
+    # NOT consumed - amount alone is not confident enough to clear a needed list
+    assert any(t.reference == "SIV2" for t in eng.get("Blue Traders").unmatched_invoices)
+    assert any(t.reference == "PAY2" for t in eng.get("Red Holdings").unmatched_payments)
 
 
 def test_cross_account_bulk_without_name_link_is_suppressed():
@@ -133,5 +143,20 @@ def test_cross_account_bulk_without_name_link_is_suppressed():
     stmt_debits = [_payment("Statement House", f"Q{i}", 700000 + i, 10 + i) for i in range(24)]
     stmt_debits.append(_payment("Statement House", "PAY3", 330000, 99))
     stmt = Supplier("Statement House", 0, -1_500_000, stmt_debits)
-    settlements = cross_account_settlements(analyze(SupplierReport(suppliers=[green, stmt])).suppliers)
-    assert [s for s in settlements if s.amount_cents == 330000] == []
+    eng = analyze(SupplierReport(suppliers=[green, stmt]))
+    assert [s for s in eng.settlements if s.amount_cents == 330000] == []
+
+
+def test_cross_account_taught_alias_links_unrelated_names():
+    # No shared name token, but the user taught supplier "Blue Traders" the alias
+    # "Red Holdings" -> the pair is name_linked (and consumed), not amount_only.
+    blue = Supplier("Blue Traders", 0, 250000, [_invoice("Blue Traders", "SIV2", 250000, 0)])
+    red = Supplier("Red Holdings", 0, -250000, [_payment("Red Holdings", "PAY2", 250000, 1)])
+    eng = analyze(SupplierReport(suppliers=[blue, red]),
+                  manual_patterns={"Blue Traders": ["Red Holdings"]})
+    hit = [s for s in eng.settlements if s.amount_cents == 250000]
+    assert len(hit) == 1
+    assert hit[0].confidence == "name_linked"
+    assert hit[0].evidence  # alias tokens present
+    assert eng.get("Blue Traders").unmatched_invoices == []
+    assert eng.get("Red Holdings").unmatched_payments == []

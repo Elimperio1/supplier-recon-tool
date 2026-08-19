@@ -191,8 +191,8 @@ def rand(cents) -> str:
 # __dict__ directly, skipping field defaults) -> AttributeError. Passing this salt
 # as an argument means bumping it changes the cache key and bypasses stale entries.
 # BUMP THIS whenever SupplierReport / BankReport / EngineResult (or anything they
-# nest) changes shape.
-_CACHE_VERSION = 2
+# nest) changes shape, OR when engine behavior changes what a cached result holds.
+_CACHE_VERSION = 3
 
 
 @st.cache_data(show_spinner=False)
@@ -206,8 +206,9 @@ def _parse_bank(data: bytes, version: int) -> BankReport:
 
 
 @st.cache_data(show_spinner=False)
-def _analyze(supplier_bytes: bytes, version: int) -> EngineResult:
-    return analyze(parse_supplier_report(supplier_bytes))
+def _analyze(supplier_bytes: bytes, version: int,
+             manual_patterns: dict[str, list[str]]) -> EngineResult:
+    return analyze(parse_supplier_report(supplier_bytes), manual_patterns)
 
 
 # ---------------------------------------------------------------------------
@@ -313,17 +314,21 @@ if st.session_state.get("run_sig") != _sig:
     st.stop()
 
 # ---- Compute --------------------------------------------------------------
-supplier_report = _parse_supplier(supplier_bytes, _CACHE_VERSION)
-engine = _analyze(supplier_bytes, _CACHE_VERSION)
-bank_report = _parse_bank(bank_bytes, _CACHE_VERSION) if bank_bytes is not None else None
-bank_index = account_payment_index(bank_report) if bank_report else {}
-
+# Aliases are read first because taught aliases feed the engine's cross-account
+# pass (a pattern saved for supplier X that reaches Y's name links the accounts),
+# not just the bank search. `manual` is a cache key of _analyze, so saving an
+# alias recomputes the analysis with it - that is the learning loop.
 refresh = st.session_state.setdefault("alias_refresh", 0)
 _flash = st.session_state.pop("alias_flash", None)
 if _flash:
     st.toast(_flash)
 aliases = [sheets_mod.AliasRow(**d) for d in _read_aliases(client_status, refresh)]
 manual = _manual_patterns(aliases, client)
+
+supplier_report = _parse_supplier(supplier_bytes, _CACHE_VERSION)
+engine = _analyze(supplier_bytes, _CACHE_VERSION, manual)
+bank_report = _parse_bank(bank_bytes, _CACHE_VERSION) if bank_bytes is not None else None
+bank_index = account_payment_index(bank_report) if bank_report else {}
 
 matches: dict[str, list] = {}
 if bank_report is not None:
