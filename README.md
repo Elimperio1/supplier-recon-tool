@@ -19,7 +19,7 @@ Report) it produces six worksheets:
 - **Invoices Needed** — payments with no invoice; request the invoice.
 - **Cross-Supplier** — duplicate / mis-captured accounts (balance mirrors, item
   matches, payments that name another supplier).
-- **Capture Typos** — same supplier, amounts within 5 cents.
+- **Capture Typos** — same supplier, amounts within R1.00.
 - **Integrity** — recomputed vs reported closing to the cent; unrecognized rows.
 
 Everything downloads as an Excel workbook.

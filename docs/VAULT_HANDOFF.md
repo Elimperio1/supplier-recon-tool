@@ -40,7 +40,7 @@ Streamlit (UI only, `app.py`) · pure-stdlib recon engine in `recon/` (`parse`, 
 
 ## What it produces
 
-Six worksheets over one engine result (UI tabs plus an Excel download): **Summary** (every supplier, green/red) · **Payments Needed** (unmatched invoices, each with the bank Account Payment that likely settled it, tiered confident / ambiguous / none) · **Invoices Needed** · **Cross-Supplier** (duplicate or mis-captured accounts) · **Capture Typos** (same supplier, amounts within 5 cents) · **Integrity** (recomputed closing vs reported closing, to the cent).
+Six worksheets over one engine result (UI tabs plus an Excel download): **Summary** (every supplier, green/red) · **Payments Needed** (unmatched invoices, each with the bank Account Payment that likely settled it, tiered confident / ambiguous / none) · **Invoices Needed** · **Cross-Supplier** (duplicate or mis-captured accounts) · **Capture Typos** (same supplier, amounts within R1.00) · **Integrity** (recomputed closing vs reported closing, to the cent).
 
 ## Hard constraints (do not violate)
 

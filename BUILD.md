@@ -142,9 +142,11 @@ Green: `|closing| < 1 cent`. Red splits by sign per §2.1 into Payments Needed
 - Build **multisets** (Counter keyed on cents) of credits and debits. Pair equal
   amounts by count. Multisets, not sets: identical amounts recur constantly
   (daily fuel, monthly fees). Leftovers = unmatched invoices / unmatched payments.
-- **Near-match pass** on the leftovers: pairs with `|diff| ≤ 5 cents` → "Capture
-  Typos" sheet (same supplier, e.g. PAY 1369.28 vs SIV 1369.26, and 249.99 vs
-  249.95). These little residuals are why several closings are off by odd cents.
+- **Near-match pass** on the leftovers: pairs with `|diff| ≤ R1.00` → "Capture
+  Typos" sheet (same supplier, e.g. PAY 1369.28 vs SIV 1369.26, and 983.86 vs
+  983.66). These little residuals are why several closings are off by odd cents.
+  Widened from 5c on 2026-08-19 (real 20c keying errors were slipping through);
+  safe because a near-match is never silently cleared - always human-reviewed.
 - **Combination pass** (one payment covering N invoices): only when a side has ≤ 20
   unmatched items; try combinations up to size 4 summing exactly to an item on the
   other side; stop at first hit per target; hard runtime cap. With ~300 unmatched

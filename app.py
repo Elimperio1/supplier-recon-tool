@@ -194,7 +194,7 @@ def rand(cents) -> str:
 # as an argument means bumping it changes the cache key and bypasses stale entries.
 # BUMP THIS whenever SupplierReport / BankReport / EngineResult (or anything they
 # nest) changes shape, OR when engine behavior changes what a cached result holds.
-_CACHE_VERSION = 4
+_CACHE_VERSION = 5
 
 
 @st.cache_data(show_spinner=False)
@@ -540,8 +540,9 @@ with tabs[5]:
 
 # ---- Capture Typos --------------------------------------------------------
 with tabs[6]:
-    st.markdown('<div class="sec">Same supplier, amounts within 5 cents - likely a capture typo '
-                '(e.g. 1369.28 vs 1369.26).</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec">Same supplier, amounts within R1.00 - likely a capture typo '
+                '(e.g. 983.86 vs 983.66). Surfaced for review, never silently paired.</div>',
+                unsafe_allow_html=True)
     rows = []
     for res in engine.suppliers:
         for tp in res.typos:

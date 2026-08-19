@@ -148,6 +148,22 @@ def test_cross_account_bulk_without_name_link_is_suppressed():
     assert [s for s in eng.settlements if s.amount_cents == 330000] == []
 
 
+def test_near_match_tolerance_is_one_rand():
+    # 20c keying error (real case: 983.86 vs 983.66) must pair as a typo now,
+    # while a diff just over R1.00 must stay unmatched.
+    s20 = Supplier("T20", 0, -20, [
+        _invoice("T20", "I1", 98366, 0), _payment("T20", "P1", 98386, 1)])
+    res = analyze_supplier(s20)
+    assert len(res.typos) == 1 and res.typos[0].diff_cents == -20
+    assert res.unmatched_invoices == [] and res.unmatched_payments == []
+
+    s101 = Supplier("T101", 0, -101, [
+        _invoice("T101", "I1", 98366, 0), _payment("T101", "P1", 98467, 1)])
+    res = analyze_supplier(s101)
+    assert res.typos == []
+    assert len(res.unmatched_invoices) == 1 and len(res.unmatched_payments) == 1
+
+
 # --- Ledger grading (green <= 10 days, yellow otherwise, red unmatched) ------
 
 def _inv_d(name, ref, cents, date, ri):

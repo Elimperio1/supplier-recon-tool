@@ -17,8 +17,10 @@ from .parse import Supplier, SupplierReport, SupplierTxn
 
 # Classification threshold: |closing| < 1 cent is green.
 GREEN_EPS = 1
-# Near-match (capture typo) tolerance, cents.
-TYPO_TOLERANCE = 5
+# Near-match (capture typo) tolerance, cents. R1.00: wide enough to catch real
+# keying errors like 983.86 vs 983.66 (20c), and safe because a near-match is
+# never silently cleared - it always lands on Capture Typos for human review.
+TYPO_TOLERANCE = 100
 # Combination pass bounds (§3.2): skip when a side exceeds this many items.
 COMBO_MAX_ITEMS = 20
 COMBO_MAX_SIZE = 4
