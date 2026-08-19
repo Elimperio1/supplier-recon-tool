@@ -290,7 +290,7 @@ have_supplier = st.session_state.get("sup") is not None
 with st.expander("Data & client", expanded=not have_supplier):
     cols = st.columns([1.2, 1, 1])
     client = cols[0].text_input("Client name", value="",
-                                help="Scopes learned aliases and the match log.")
+                                help="Scopes learned mapping rules and the match log.")
     sup_file = cols[1].file_uploader("Supplier Transactions Report", type="csv", key="sup")
     bank_file = cols[2].file_uploader("Banks & Credit Cards Report", type="csv", key="bank")
     if client_status is None and client_err:
@@ -600,20 +600,21 @@ with tabs[7]:
     if supplier_report.duplicate_names:
         st.warning("Duplicate supplier names (kept separate): " + ", ".join(supplier_report.duplicate_names))
 
-# ---- Teach an alias (main body footer) ------------------------------------
-with st.expander("Teach an alias"):
-    st.markdown('<div class="sec">Map bank text derivation can\'t reach '
-                '(e.g. <b>USAVE</b> to Shoprite).</div>', unsafe_allow_html=True)
+# ---- Mapping rules (main body footer; stored on the Sheet's aliases tab) ---
+with st.expander("Mapping rules"):
+    st.markdown('<div class="sec">Map bank text or another account name to a supplier '
+                '(e.g. <b>USAVE</b> to Shoprite, or <b>Elgin Agrimark</b> to Agrimark).</div>',
+                unsafe_allow_html=True)
     acols = st.columns([1, 1, 1.4, 0.7])
     a_sup = acols[0].text_input("Supplier", key="alias_sup")
-    a_pat = acols[1].text_input("Alias pattern", key="alias_pat")
+    a_pat = acols[1].text_input("Description Map", key="alias_pat")
     a_notes = acols[2].text_input("Notes", key="alias_notes")
     acols[3].markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
     if acols[3].button("Save", key="save_alias"):
         if client_status is None:
             st.error("Sheets offline - cannot save.")
         elif not (a_sup.strip() and a_pat.strip()):
-            st.error("Supplier and alias pattern are required.")
+            st.error("Supplier and Description Map are required.")
         else:
             try:
                 wrote = client_status.append_alias(sheets_mod.AliasRow(
@@ -621,15 +622,15 @@ with st.expander("Teach an alias"):
                     alias_pattern=a_pat.strip(), source="manual", notes=a_notes.strip()))
                 st.session_state["alias_refresh"] = refresh + 1
                 st.session_state["alias_flash"] = (
-                    "Alias saved - matching re-run with it." if wrote
-                    else "That alias already existed - matching re-run anyway.")
+                    "Mapping rule saved - matching re-run with it." if wrote
+                    else "That mapping rule already existed - matching re-run anyway.")
                 st.rerun()
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Could not save: {exc}")
 
     st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
-    st.caption("Edited aliases in the sheet, or just saved one? Re-run reloads them "
-               "and recomputes every match.")
-    if st.button("Re-run matching with latest aliases", key="rerun_match"):
+    st.caption("Edited mapping rules in the sheet, or just saved one? Re-run reloads "
+               "them and recomputes every match.")
+    if st.button("Re-run matching with latest mapping rules", key="rerun_match"):
         st.session_state["alias_refresh"] = refresh + 1
         st.rerun()
