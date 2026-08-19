@@ -14,6 +14,7 @@ all default Streamlit chrome (menu, footer, header, sidebar) hidden. No sidebar.
 from __future__ import annotations
 
 import html
+from dataclasses import asdict
 
 import pandas as pd
 import streamlit as st
@@ -212,11 +213,16 @@ def _sheets_client():
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _read_aliases(_client, refresh: int):
+def _read_aliases(_client, refresh: int) -> list[dict]:
+    # Return plain dicts, not AliasRow instances. st.cache_data pickles the
+    # return value; a custom class pickles by module+qualname and Streamlit
+    # Cloud can hold a second copy of the class object (script re-import),
+    # which trips UnserializableReturnValueError even though it pickles fine
+    # locally. Dicts of strings pickle by value with no class-identity check.
     if _client is None:
         return []
     try:
-        return _client.read_aliases()
+        return [asdict(a) for a in _client.read_aliases()]
     except Exception:  # noqa: BLE001
         return []
 
@@ -281,7 +287,7 @@ bank_report = _parse_bank(bank_bytes) if bank_bytes is not None else None
 bank_index = account_payment_index(bank_report) if bank_report else {}
 
 refresh = st.session_state.setdefault("alias_refresh", 0)
-aliases = _read_aliases(client_status, refresh)
+aliases = [sheets_mod.AliasRow(**d) for d in _read_aliases(client_status, refresh)]
 manual = _manual_patterns(aliases, client)
 
 matches: dict[str, list] = {}
