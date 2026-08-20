@@ -202,6 +202,30 @@ BREAK_FILL = PatternFill("solid", fgColor="D9D9D9")
 BREAK_FONT = Font(bold=True)
 
 
+def _balance_band(ws: Worksheet, r: int, name: str, label: str, cents: int,
+                  *, badge: bool = False, notes: Optional[str] = None) -> int:
+    """One full-width gray band carrying a single balance figure, green at R0 /
+    red otherwise. Returns the next free row."""
+    for c in range(1, 10):
+        band = ws.cell(row=r, column=c)
+        band.fill, band.font = BREAK_FILL, BREAK_FONT
+    hc = _put(ws, r, 1, name, text=True)
+    hc.fill, hc.font = BREAK_FILL, BREAK_FONT
+    lbl = _put(ws, r, 5, label, text=True)
+    lbl.fill, lbl.font = BREAK_FILL, BREAK_FONT
+    settled = abs(cents) < GREEN_EPS
+    fill, font = (GREEN_FILL, GREEN_FONT) if settled else (RED_FILL, RED_FONT)
+    amt = _put(ws, r, 7, _rand(cents), money=True)
+    amt.fill, amt.font = fill, font
+    if badge:
+        bc = _put(ws, r, 8, "SETTLED" if settled else "OPEN")
+        bc.fill, bc.font = fill, font
+    if notes:
+        nc = _put(ws, r, 9, notes, text=True)
+        nc.fill, nc.font = BREAK_FILL, BREAK_FONT
+    return r + 1
+
+
 def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
     """The source report reproduced in full - every transaction with its date -
     each row graded: green = paid on the invoice date or up to 10 days after,
@@ -213,27 +237,10 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
     _autosize(ws, headers, {1: 34, 2: 12, 3: 16, 4: 18, 5: 46, 8: 12, 9: 42})
     r = 2
     for res in engine.suppliers:
-        # Supplier break: a full-width gray band with opening/closing balances,
-        # each colored green when R0 / red when not, plus a SETTLED/OPEN badge.
-        for c in range(1, 10):
-            band = ws.cell(row=r, column=c)
-            band.fill, band.font = BREAK_FILL, BREAK_FONT
-        hc = _put(ws, r, 1, res.name, text=True)
-        hc.fill, hc.font = BREAK_FILL, BREAK_FONT
-        lbl = _put(ws, r, 5, "Opening / Closing balance", text=True)
-        lbl.fill, lbl.font = BREAK_FILL, BREAK_FONT
-        for col, cents in ((6, res.supplier.opening), (7, res.closing)):
-            cell = _put(ws, r, col, _rand(cents), money=True)
-            settled = abs(cents) < GREEN_EPS
-            cell.fill = GREEN_FILL if settled else RED_FILL
-            cell.font = GREEN_FONT if settled else RED_FONT
-        badge = _put(ws, r, 8, "SETTLED" if abs(res.closing) < GREEN_EPS else "OPEN")
-        badge.fill = GREEN_FILL if abs(res.closing) < GREEN_EPS else RED_FILL
-        badge.font = GREEN_FONT if abs(res.closing) < GREEN_EPS else RED_FONT
-        if res.notes:
-            nc = _put(ws, r, 9, "; ".join(res.notes), text=True)
-            nc.fill, nc.font = BREAK_FILL, BREAK_FONT
-        r += 1
+        # Gray bands bookend each account: opening balance above the
+        # transactions, closing balance (with its SETTLED/OPEN badge) below.
+        r = _balance_band(ws, r, res.name, "Opening balance", res.supplier.opening,
+                          notes="; ".join(res.notes) if res.notes else None)
         for row in ledger_rows(res):
             t = row.txn
             _put(ws, r, 2, t.date, text=True)
@@ -250,6 +257,7 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
                 sc.fill, sc.font = style[0], style[1]
             _put(ws, r, 9, row.note, text=True)
             r += 1
+        r = _balance_band(ws, r, res.name, "Closing balance", res.closing, badge=True)
         r += 1   # blank spacer row: clean break before the next supplier
 
 
