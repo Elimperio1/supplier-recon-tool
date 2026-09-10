@@ -29,7 +29,7 @@ import streamlit as st
 # class identity, missing dataclass field, ImportError on a new name). If the
 # in-memory engine's version is not the one this app.py was written against,
 # purge every recon module and re-import fresh.
-_EXPECTED_ENGINE_VERSION = 7
+_EXPECTED_ENGINE_VERSION = 8
 
 import recon.engine as _engine_mod  # noqa: E402
 
@@ -39,9 +39,9 @@ if getattr(_engine_mod, "ENGINE_VERSION", None) != _EXPECTED_ENGINE_VERSION:
     importlib.invalidate_caches()
     import recon.engine as _engine_mod  # noqa: E402  (fresh copy)
 
-from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, ENGINE_VERSION,
-                          LEDGER_GREEN, LEDGER_RED, LEDGER_YELLOW, EngineResult,
-                          analyze, ledger_rows)
+from recon.engine import (AGING_ALERT_DAYS, CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS,
+                          ENGINE_VERSION, LEDGER_GREEN, LEDGER_RED, LEDGER_YELLOW,
+                          EngineResult, analyze, ledger_rows)
 from recon.match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE,
                          account_payment_index, match_supplier)
 from recon.parse import (BankReport, SupplierReport, parse_bank_report,
@@ -406,37 +406,61 @@ with tabs[1]:
                 '<b>green</b> = paid on the invoice date or up to 10 days after, or the '
                 'account settles to R0 · <b>yellow</b> = same amount but needs review '
                 '(paid before the invoice, or too long after, in an unsettled account) · '
-                '<b>red</b> = no matching counterpart.</div>',
+                '<b>red</b> = no matching counterpart. <b>Balance</b> is the report\'s own '
+                'running balance, untouched. Each account foots into a gray '
+                '<b>TOTAL</b> row, and a <b>yellow description</b> means the invoice and '
+                f'its payment sit more than {AGING_ALERT_DAYS} days apart - the pair stays '
+                'matched, it is only there to be looked at.</div>',
                 unsafe_allow_html=True)
     _names = [r.name for r in engine.suppliers]
     _pick = st.selectbox("Supplier", ["All suppliers"] + _names, key="ledger_pick")
     _shown = engine.suppliers if _pick == "All suppliers" else [engine.get(_pick)]
-    lrows = []
+    lrows, _aged = [], []
     for res in _shown:
+        _dt = _ct = 0
         for row in ledger_rows(res):
             t = row.txn
+            _dt += t.debit or 0
+            _ct += t.credit or 0
             lrows.append({
                 "Supplier": res.name, "Date": t.date, "Reference": t.reference,
                 "Type": t.txn_type, "Description": t.description,
                 "Debit (R)": None if t.debit is None else t.debit / 100,
                 "Credit (R)": None if t.credit is None else t.credit / 100,
+                # the report's own running balance, carried through untouched
+                "Balance (R)": None if t.balance is None else t.balance / 100,
                 "Status": {LEDGER_GREEN: "MATCHED", LEDGER_YELLOW: "CHECK",
                            LEDGER_RED: "NO MATCH"}.get(row.status, ""),
                 "Match": row.note,
             })
+            _aged.append(row.aged)
+        # The account footed, under its own Debit/Credit columns, closing balance
+        # in the Balance column where the running balance ends.
+        lrows.append({
+            "Supplier": res.name, "Date": "", "Reference": "", "Type": "",
+            "Description": "Totals", "Debit (R)": _dt / 100, "Credit (R)": _ct / 100,
+            "Balance (R)": res.closing / 100, "Status": "TOTAL",
+            "Match": "closing balance",
+        })
+        _aged.append(False)
     if lrows:
         _ldf = pd.DataFrame(lrows)
         _colors = {"MATCHED": "background-color:#d7f0dd", "CHECK": "background-color:#fdf0c8",
-                   "NO MATCH": "background-color:#fadadd"}
+                   "NO MATCH": "background-color:#fadadd",
+                   "TOTAL": "background-color:#e8e8ed;font-weight:600"}
+        _desc_i = _ldf.columns.get_loc("Description")
 
         def _row_style(row):
-            css = _colors.get(row["Status"], "")
-            return [css] * len(row)
+            css = [_colors.get(row["Status"], "")] * len(row)
+            if _aged[row.name]:   # >30 days apart: flag the description only
+                css[_desc_i] = "background-color:#fdf0c8;font-weight:600"
+            return css
 
         st.dataframe(_ldf.style.apply(_row_style, axis=1), width="stretch", hide_index=True,
                      column_config={
                          "Debit (R)": st.column_config.NumberColumn(format="%.2f"),
                          "Credit (R)": st.column_config.NumberColumn(format="%.2f"),
+                         "Balance (R)": st.column_config.NumberColumn(format="%.2f"),
                      })
     else:
         st.info("No transactions.")

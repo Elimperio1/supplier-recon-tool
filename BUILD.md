@@ -92,6 +92,12 @@ Rule: for every balance row, read **both** columns and compute
   - **Feasibility** (bank-candidate search): a bank payment dated BEFORE the invoice
     cannot be its settlement - you cannot pay an invoice that does not exist yet -
     so it is excluded as a candidate. Unparseable dates fail open.
+  - **Aging flag** (Ledger, added 2026-09-10): any row whose counterpart sits more
+    than `AGING_ALERT_DAYS` (30) away — either direction — is marked `aged` and its
+    **Description** cell is painted amber, in the app and in the workbook. This is a
+    look-at-me marker only: it never unmatches anything and never changes the
+    green/yellow/red grade, so a 33-day pair in a settled account stays green with an
+    amber description. On the real report: 35 of 1536 rows.
 
 ### 2.3 Supplier report columns
 
@@ -106,7 +112,11 @@ Rule: for every balance row, read **both** columns and compute
   text**. This suffix is the alias-learning source (§4).
 - Descriptions can be empty (SIV0007801) and can be **date-shaped** (SIV0007181's
   description is literally `16/03/2026`) — another reason detection keys on col0 only.
-- Do not assume the running Balance column starts at zero or is continuous.
+- Do not assume the running Balance column starts at zero or is continuous. It is
+  never used to derive anything (every balance is recomputed from the transactions),
+  but it is **kept**: `SupplierTxn.balance_raw` carries the cell verbatim,
+  `.balance` parses it to cents, and the Ledger — app tab and workbook — renders it
+  as its own column. A cell that will not parse is shown as text, never dropped.
 
 ### 2.4 Bank report columns
 
@@ -308,6 +318,12 @@ App
 - [ ] Unique widget keys in loops
 - [ ] Excel: amounts as numbers, descriptions as text (no date coercion),
       frozen header row, red/green fills
+- [ ] Ledger sheet, per account: opening band, transactions, **Totals** band
+      (debits and credits under their own columns), closing band — and
+      `opening + credits − debits` must equal the closing figure
+- [ ] Ledger keeps the report's own **Balance** column, and the opening/closing
+      bands sit in it, so the running balance reads as one continuous column
+- [ ] Ledger: amber Description = counterpart >30 days away, grade unchanged
 - [ ] `dayfirst` dates in any display parsing; future-dated closing rows kept
 
 ## 9. Golden numbers — the build MUST reproduce these on the two real CSVs

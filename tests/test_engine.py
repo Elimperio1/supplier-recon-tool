@@ -3,9 +3,10 @@
 from pathlib import Path
 
 from recon.parse import parse_supplier_report, Supplier, SupplierReport, SupplierTxn
-from recon.engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, LEDGER_GREEN,
-                          LEDGER_RED, LEDGER_YELLOW, analyze, analyze_supplier,
-                          classify, cross_account_settlements, ledger_rows)
+from recon.engine import (AGING_ALERT_DAYS, CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS,
+                          LEDGER_GREEN, LEDGER_RED, LEDGER_YELLOW, analyze,
+                          analyze_supplier, classify, cross_account_settlements,
+                          ledger_rows)
 
 FIX = Path(__file__).parent / "fixtures"
 SUP = FIX / "supplier_traps.csv"
@@ -255,3 +256,57 @@ def test_cross_account_taught_alias_links_unrelated_names():
     assert hit[0].evidence  # alias tokens present
     assert eng.get("Blue Traders").unmatched_invoices == []
     assert eng.get("Red Holdings").unmatched_payments == []
+
+
+# --- Aging flag: >30 days between invoice and payment (a check, not a break) --
+
+def test_ledger_aged_flag_marks_far_apart_pair_without_unmatching_it():
+    # Settled account: the pair stays GREEN (the R0 balance confirms it), but the
+    # 141-day gap raises the aging flag so the description can be painted.
+    s = Supplier("W", 0, 0, [_inv_d("W", "I1", 5000, "01/03/2026", 0),
+                             _pay_d("W", "P1", 5000, "20/07/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.status for r in rows] == [LEDGER_GREEN, LEDGER_GREEN]
+    assert [r.aged for r in rows] == [True, True]
+    assert [r.lag_days for r in rows] == [141, 141]
+    assert f"over {AGING_ALERT_DAYS} days" in rows[0].note
+
+
+def test_ledger_aged_flag_off_inside_the_window():
+    # 30 days exactly is NOT over 30 - the boundary stays clean.
+    s = Supplier("W", 0, 0, [_inv_d("W", "I1", 5000, "01/06/2026", 0),
+                             _pay_d("W", "P1", 5000, "01/07/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.lag_days for r in rows] == [30, 30]
+    assert [r.aged for r in rows] == [False, False]
+    assert "over" not in rows[0].note
+
+    s31 = Supplier("W", 0, 0, [_inv_d("W", "I1", 5000, "01/06/2026", 0),
+                               _pay_d("W", "P1", 5000, "02/07/2026", 1)])
+    assert [r.aged for r in ledger_rows(analyze_supplier(s31))] == [True, True]
+
+
+def test_ledger_aged_flag_covers_payment_long_before_invoice():
+    # Wrong direction counts too: the two dates are 60 days apart either way.
+    s = Supplier("W", 0, 0, [_pay_d("W", "P1", 5000, "01/05/2026", 0),
+                             _inv_d("W", "I1", 5000, "30/06/2026", 1)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert [r.aged for r in rows] == [True, True]
+    assert rows[0].lag_days == -60
+
+
+def test_ledger_unmatched_row_has_no_aging_flag():
+    s = Supplier("W", 0, 7000, [_inv_d("W", "I1", 7000, "01/07/2026", 0)])
+    rows = ledger_rows(analyze_supplier(s))
+    assert rows[0].lag_days is None and rows[0].aged is False
+    assert rows[0].note == "no matching payment"
+
+
+def test_ledger_aged_flag_on_cross_account_settlement():
+    agrimark = Supplier("Agrimark", 0, 176815,
+                        [_inv_d("Agrimark", "SIV1", 176815, "01/03/2026", 0)])
+    elgin = Supplier("Elgin Agrimark", 0, -176815,
+                     [_pay_d("Elgin Agrimark", "PAY1", 176815, "20/07/2026", 1)])
+    eng = analyze(SupplierReport(suppliers=[agrimark, elgin]))
+    assert ledger_rows(eng.get("Agrimark"))[0].aged is True
+    assert ledger_rows(eng.get("Elgin Agrimark"))[0].aged is True

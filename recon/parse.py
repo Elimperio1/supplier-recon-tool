@@ -123,6 +123,13 @@ class SupplierTxn:
     def signed(self) -> int:
         return (self.credit or 0) - (self.debit or 0)
 
+    @property
+    def balance(self) -> Optional[int]:
+        """The report's OWN running balance for this row, in cents - never
+        recomputed. Same credit-positive convention as ``signed`` (a payment
+        drives it negative). None when the cell is blank or unparseable."""
+        return to_cents(self.balance_raw)
+
 
 @dataclass
 class Supplier:

@@ -18,7 +18,7 @@ from .parse import Supplier, SupplierReport, SupplierTxn
 # Bumped on ANY change to result shapes or matching behavior. app.py uses this
 # both as the st.cache_data salt AND to detect a stale module surviving a
 # Streamlit Cloud redeploy (the process keeps sys.modules across git pushes).
-ENGINE_VERSION = 7
+ENGINE_VERSION = 8
 
 # Classification threshold: |closing| < 1 cent is green.
 GREEN_EPS = 1
@@ -561,8 +561,14 @@ def cross_account_settlements(
 # capture artifacts, not open items - so pairs and combinations grade green
 # with the anomaly kept in the note. Typos stay yellow (amounts differ) and
 # unmatched stay red (no item-level counterpart) even at R0.
+#
+# Aging flag (independent of the grade): whenever a row HAS a counterpart and the
+# two dates sit more than AGING_ALERT_DAYS apart, the row is marked ``aged``. This
+# never unmatches anything and never changes the status - green pairs stay green -
+# it only paints the description so a slow-settling item is visible at a glance.
 
 MATCH_WINDOW_DAYS = 10
+AGING_ALERT_DAYS = 30
 
 LEDGER_GREEN = "green"
 LEDGER_YELLOW = "yellow"
@@ -574,6 +580,8 @@ class LedgerRow:
     txn: SupplierTxn
     status: str            # green | yellow | red | "" (informational row)
     note: str              # counterpart + day gap, or the reason it is red
+    lag_days: Optional[int] = None   # signed days invoice -> payment, if known
+    aged: bool = False               # |lag| > AGING_ALERT_DAYS (check, not a break)
 
 
 def _parse_dmy(s: str):
@@ -608,9 +616,12 @@ def _lag_text(lag: Optional[int]) -> str:
 
 def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
     status: dict[int, tuple[str, str]] = {}
+    lag_of: dict[int, int] = {}
 
-    def mark(t: SupplierTxn, st: str, note: str) -> None:
+    def mark(t: SupplierTxn, st: str, note: str, lag: Optional[int] = None) -> None:
         status[id(t)] = (st, note)
+        if lag is not None:
+            lag_of[id(t)] = lag
 
     settles = result.category == CAT_GREEN   # closing R0: the account confirms its pairs
 
@@ -618,23 +629,24 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
         lag = _pay_lag_days(inv.date, pay.date)
         grade = _lag_grade(lag)
         if grade == LEDGER_GREEN:
-            mark(inv, grade, f"paired with {pay.reference or 'payment'} ({_lag_text(lag)})")
-            mark(pay, grade, f"paired with {inv.reference or 'invoice'} ({_lag_text(lag)})")
+            mark(inv, grade, f"paired with {pay.reference or 'payment'} ({_lag_text(lag)})", lag)
+            mark(pay, grade, f"paired with {inv.reference or 'invoice'} ({_lag_text(lag)})", lag)
         else:
             gap = _lag_text(lag) if lag is None or lag < 0 else f"{lag} days apart"
             if settles:
                 mark(inv, LEDGER_GREEN,
-                     f"paired with {pay.reference or 'payment'} ({gap}; account settles to R0)")
+                     f"paired with {pay.reference or 'payment'} ({gap}; account settles to R0)", lag)
                 mark(pay, LEDGER_GREEN,
-                     f"paired with {inv.reference or 'invoice'} ({gap}; account settles to R0)")
+                     f"paired with {inv.reference or 'invoice'} ({gap}; account settles to R0)", lag)
             else:
-                mark(inv, grade, f"same amount as {pay.reference or 'payment'} ({gap})")
-                mark(pay, grade, f"same amount as {inv.reference or 'invoice'} ({gap})")
+                mark(inv, grade, f"same amount as {pay.reference or 'payment'} ({gap})", lag)
+                mark(pay, grade, f"same amount as {inv.reference or 'invoice'} ({gap})", lag)
 
     for tp in result.typos:
         d = f"diff R{abs(tp.diff_cents) / 100:.2f}"
-        mark(tp.invoice, LEDGER_YELLOW, f"near amount {tp.payment.reference or '-'} ({d})")
-        mark(tp.payment, LEDGER_YELLOW, f"near amount {tp.invoice.reference or '-'} ({d})")
+        lag = _pay_lag_days(tp.invoice.date, tp.payment.date)
+        mark(tp.invoice, LEDGER_YELLOW, f"near amount {tp.payment.reference or '-'} ({d})", lag)
+        mark(tp.payment, LEDGER_YELLOW, f"near amount {tp.invoice.reference or '-'} ({d})", lag)
 
     for cm in result.combinations:
         # target_side 'payment': one payment covers N invoices; 'invoice': reversed.
@@ -646,9 +658,13 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
         st = LEDGER_GREEN if within or settles else LEDGER_YELLOW
         confirm = "" if within else "; account settles to R0" if settles else ""
         refs = " + ".join(p.reference or "-" for p in cm.parts)
-        mark(cm.target, st, f"combination of {refs}{confirm}")
-        for p in cm.parts:
-            mark(p, st, f"part of combination for {cm.target.reference or '-'}{confirm}")
+        known = [l for l in lags if l is not None]
+        # The combination row carries the WORST gap of its parts - one slow leg
+        # is enough to make the whole settlement worth a look.
+        mark(cm.target, st, f"combination of {refs}{confirm}",
+             max(known, key=abs) if known else None)
+        for p, l in zip(cm.parts, lags):
+            mark(p, st, f"part of combination for {cm.target.reference or '-'}{confirm}", l)
 
     for t, s in result.settled_items:
         if t.credit:   # this row is the invoice; counterpart is the payment
@@ -657,7 +673,8 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
         else:          # this row is the payment; counterpart is the invoice
             other_sup, other_ref = s.invoice_supplier, s.invoice_ref
             lag = _pay_lag_days(s.invoice_date, t.date)
-        mark(t, _lag_grade(lag), f"cross-account {other_sup} {other_ref or '-'} ({_lag_text(lag)})")
+        mark(t, _lag_grade(lag),
+             f"cross-account {other_sup} {other_ref or '-'} ({_lag_text(lag)})", lag)
 
     for t in result.unmatched_invoices:
         mark(t, LEDGER_RED, "no matching payment")
@@ -667,7 +684,11 @@ def ledger_rows(result: SupplierResult) -> list[LedgerRow]:
     out: list[LedgerRow] = []
     for t in sorted(result.supplier.txns, key=lambda x: x.row_index):
         st, note = status.get(id(t), ("", ""))
-        out.append(LedgerRow(txn=t, status=st, note=note))
+        lag = lag_of.get(id(t))
+        aged = lag is not None and abs(lag) > AGING_ALERT_DAYS
+        if aged:
+            note = f"{note} · over {AGING_ALERT_DAYS} days"
+        out.append(LedgerRow(txn=t, status=st, note=note, lag_days=lag, aged=aged))
     return out
 
 

@@ -202,11 +202,15 @@ BREAK_FILL = PatternFill("solid", fgColor="D9D9D9")
 BREAK_FONT = Font(bold=True)
 
 
+LEDGER_COLS = 10   # Supplier..Match; bands paint the full width
+
+
 def _balance_band(ws: Worksheet, r: int, name: str, label: str, cents: int,
                   *, badge: bool = False, notes: Optional[str] = None) -> int:
-    """One full-width gray band carrying a single balance figure, green at R0 /
-    red otherwise. Returns the next free row."""
-    for c in range(1, 10):
+    """One full-width gray band carrying a single balance figure - written into
+    the Balance column, so opening -> running balances -> closing read as one
+    continuous column - green at R0 / red otherwise. Returns the next free row."""
+    for c in range(1, LEDGER_COLS + 1):
         band = ws.cell(row=r, column=c)
         band.fill, band.font = BREAK_FILL, BREAK_FONT
     hc = _put(ws, r, 1, name, text=True)
@@ -215,14 +219,28 @@ def _balance_band(ws: Worksheet, r: int, name: str, label: str, cents: int,
     lbl.fill, lbl.font = BREAK_FILL, BREAK_FONT
     settled = abs(cents) < GREEN_EPS
     fill, font = (GREEN_FILL, GREEN_FONT) if settled else (RED_FILL, RED_FONT)
-    amt = _put(ws, r, 7, _rand(cents), money=True)
+    amt = _put(ws, r, 8, _rand(cents), money=True)
     amt.fill, amt.font = fill, font
     if badge:
-        bc = _put(ws, r, 8, "SETTLED" if settled else "OPEN")
+        bc = _put(ws, r, 9, "SETTLED" if settled else "OPEN")
         bc.fill, bc.font = fill, font
     if notes:
-        nc = _put(ws, r, 9, notes, text=True)
+        nc = _put(ws, r, 10, notes, text=True)
         nc.fill, nc.font = BREAK_FILL, BREAK_FONT
+    return r + 1
+
+
+def _totals_band(ws: Worksheet, r: int, debit: int, credit: int) -> int:
+    """The account footed: total debits and total credits under their columns,
+    so ``opening + credits - debits`` can be tied to the closing band below."""
+    for c in range(1, LEDGER_COLS + 1):
+        band = ws.cell(row=r, column=c)
+        band.fill, band.font = BREAK_FILL, BREAK_FONT
+    lbl = _put(ws, r, 5, "Totals", text=True)
+    lbl.fill, lbl.font = BREAK_FILL, BREAK_FONT
+    for col, cents in ((6, debit), (7, credit)):
+        cell = _put(ws, r, col, _rand(cents), money=True)
+        cell.fill, cell.font = BREAK_FILL, BREAK_FONT
     return r + 1
 
 
@@ -230,33 +248,52 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
     """The source report reproduced in full - every transaction with its date -
     each row graded: green = paid on the invoice date or up to 10 days after,
     yellow = same amount but needs review (paid BEFORE the invoice, too long
-    after, near-miss, out-of-window combination), red = no counterpart."""
+    after, near-miss, out-of-window combination), red = no counterpart.
+
+    Balance is the REPORT'S OWN running balance for the row, carried through
+    untouched (never recomputed), so the sheet reproduces the source column for
+    column. Two aids on top of the grade: each account foots into a Totals band
+    (debits and credits under their own columns), and the Description cell is
+    painted amber whenever a row's counterpart sits more than AGING_ALERT_DAYS
+    away - a flag to look at, never an unmatch."""
     headers = ["Supplier", "Date", "Reference", "Type", "Description",
-               "Debit (R)", "Credit (R)", "Status", "Match"]
+               "Debit (R)", "Credit (R)", "Balance (R)", "Status", "Match"]
     _header(ws, headers)
-    _autosize(ws, headers, {1: 34, 2: 12, 3: 16, 4: 18, 5: 46, 8: 12, 9: 42})
+    _autosize(ws, headers, {1: 34, 2: 12, 3: 16, 4: 18, 5: 46, 9: 12, 10: 42})
     r = 2
     for res in engine.suppliers:
         # Gray bands bookend each account: opening balance above the
         # transactions, closing balance (with its SETTLED/OPEN badge) below.
         r = _balance_band(ws, r, res.name, "Opening balance", res.supplier.opening,
                           notes="; ".join(res.notes) if res.notes else None)
+        debit_total = credit_total = 0
         for row in ledger_rows(res):
             t = row.txn
+            debit_total += t.debit or 0
+            credit_total += t.credit or 0
             _put(ws, r, 2, t.date, text=True)
             _put(ws, r, 3, t.reference, text=True)
             _put(ws, r, 4, t.txn_type, text=True)
-            _put(ws, r, 5, t.description, text=True)
+            dc = _put(ws, r, 5, t.description, text=True)
+            if row.aged:
+                dc.fill, dc.font = AMBER_FILL, AMBER_FONT
             style = LEDGER_STYLE.get(row.status)
             for col, cents in ((6, t.debit), (7, t.credit)):
                 cell = _put(ws, r, col, _rand(cents), money=True)
                 if style and cents is not None:
                     cell.fill, cell.font = style[0], style[1]
+            # The report's own Balance cell: a number when it reads as one, else
+            # the raw text kept verbatim rather than dropped.
+            if t.balance is not None:
+                _put(ws, r, 8, _rand(t.balance), money=True)
+            elif (t.balance_raw or "").strip():
+                _put(ws, r, 8, t.balance_raw, text=True)
             if style:
-                sc = _put(ws, r, 8, style[2])
+                sc = _put(ws, r, 9, style[2])
                 sc.fill, sc.font = style[0], style[1]
-            _put(ws, r, 9, row.note, text=True)
+            _put(ws, r, 10, row.note, text=True)
             r += 1
+        r = _totals_band(ws, r, debit_total, credit_total)
         r = _balance_band(ws, r, res.name, "Closing balance", res.closing, badge=True)
         r += 1   # blank spacer row: clean break before the next supplier
 
