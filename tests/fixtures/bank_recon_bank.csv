@@ -1,0 +1,17 @@
+#META,format,writeup-v1
+#META,bank,Test Bank
+#META,period_start,30/07/2026
+#META,period_end,05/08/2026
+Date,Description,Amount
+30/07/2026,OPENING CREDIT magtape credit,100.00
+01/08/2026,ACME HARDWARE ib payment,-1500.00
+01/08/2026,ACME HARDWARE ib payment,-1500.00
+01/08/2026,0108 honouring fee,-155.00
+01/08/2026,0108 honouring fee,-155.00
+01/08/2026,0108 honouring fee,-155.00
+02/08/2026,PREPAID ELEC 12H00 purchase,-500.00
+02/08/2026,RENT AUGUST ib payment,-9000.00
+03/08/2026,SALES DEPOSIT credit transfer,2500.00
+03/08/2026,ACC fee immediate payment,-45.00
+03/08/2026,ACC fee immediate payment,-45.00
+05/08/2026,CUSTOMER ONE payment,1200.00

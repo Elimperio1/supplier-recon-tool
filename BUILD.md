@@ -19,8 +19,17 @@ number in §9 was measured, not assumed. Follow this doc exactly; where it says
 
 ## 1. File layout
 
+Since 2026-09-21 the repo ships the **Recon Toolbox**: `app.py` is the entry (page
+config, shared design layer `ui.py`, a segmented control that picks the tool, and
+`st.navigation` with the sidebar hidden), and this tool's screen is the page
+`tools/supplier_recon.py`. A second tool, Bank Recon, lives in `bankrecon/` and
+`tools/bank_recon.py` (spec: `docs/BANK_RECON.md`). Nothing below changes for the
+supplier engine.
+
 ```
-app.py                  # Streamlit UI only — no business logic
+app.py                  # Recon Toolbox entry; no business logic
+ui.py                   # shared design layer (CSS, hero, stat tiles)
+tools/supplier_recon.py # this tool's Streamlit page, renders only
 recon/
   parse.py              # Sage CSV -> dataclasses (both reports)
   engine.py             # classification, within/cross-supplier pairing
@@ -38,7 +47,7 @@ BUILD.md                # this file
 
 Engine functions take parsed data and return plain dataclasses/dicts; the UI and the
 Excel export are two renderers over the same result object. No Streamlit imports
-outside `app.py`.
+outside `app.py`, `ui.py` and `tools/`.
 
 ## 2. Parsing the Sage exports (§8 traps apply to every line of this section)
 
