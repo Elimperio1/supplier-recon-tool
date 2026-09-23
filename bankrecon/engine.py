@@ -11,9 +11,13 @@ consumed by the first pass that claims it:
 1. Exact: same date, same cents, same normalised description (the CSV text
    against Sage's Description or its Comment, which holds the bank narrative
    when the Description was renamed to a supplier name).
-2. Amount only: same date, same cents, description differs. When several Sage
-   lines qualify the one with the most words in common wins; ties go to file
-   order. Reported for review.
+2. Same date, same cents, descriptions differ. With name evidence, a
+   distinctive word shared with Sage's description or account name, or one
+   text found inside the other, the pair is "Name" and counts as matched
+   (Sage's Banks and Credit Cards report names the supplier instead of
+   quoting the bank narrative). Without evidence the pair is "Amount only"
+   and is reported for review. Best evidence wins, then most words in
+   common, then file order.
 3. Split: one CSV line equals the sum of two or more Sage lines on the same
    date that share a Reference (Sage splits one bank line into allocations
    under one reference). Sage lines without a reference are never grouped.
@@ -39,15 +43,17 @@ from typing import Optional
 
 from .parse import Parsed, Txn
 
-ENGINE_VERSION = 1
+ENGINE_VERSION = 2
 
 TIER_EXACT = "Exact"
+TIER_NAME = "Name"
 TIER_AMOUNT = "Amount only"
 TIER_SPLIT = "Split"
 TIER_DATE = "Date differs"
 REVIEW_TIERS = (TIER_AMOUNT, TIER_SPLIT, TIER_DATE)
 
 STATUS_MATCHED = "Matched"
+STATUS_NAME = "Matched, name"
 STATUS_AMOUNT = "Matched, amount only"
 STATUS_SPLIT = "Matched, split"
 STATUS_DATE = "Matched, date differs"
@@ -57,10 +63,21 @@ STATUS_OUTSIDE = "Outside window"
 
 TIER_STATUS = {
     TIER_EXACT: STATUS_MATCHED,
+    TIER_NAME: STATUS_NAME,
     TIER_AMOUNT: STATUS_AMOUNT,
     TIER_SPLIT: STATUS_SPLIT,
     TIER_DATE: STATUS_DATE,
 }
+
+# Words that carry no identity: they appear on most bank lines and match nothing in
+# particular. A pair whose only shared word is one of these rests on amount alone.
+STOPWORDS = frozenset({
+    "payment", "payments", "purchase", "purchases", "transfer", "debit", "credit",
+    "account", "fees", "card", "magtape", "electronic", "banking", "service",
+    "agreement", "insurance", "premium", "cash", "bank", "charges", "transaction",
+    "deposit", "receipt", "from", "with", "online", "immediate", "monthly", "internet",
+    "order", "cheque", "withdrawal", "loan", "repayment", "confirm", "email",
+})
 
 
 @dataclass(frozen=True)
@@ -106,6 +123,10 @@ class Result:
     csv_skipped: list[tuple[int, str]] = field(default_factory=list)
     sage_skipped: list[tuple[int, str]] = field(default_factory=list)
     sign_flip_hint: bool = False
+    sage_account: str = ""                       # sectioned Sage report: the account compared
+    sage_opening: Optional[int] = None           # its Opening Balance, whole file
+    sage_closing: Optional[int] = None           # its Closing Balance, whole file
+    sage_integrity_ok: Optional[bool] = None     # opening plus every line equals closing
 
     @property
     def csv_total(self) -> int:
@@ -180,6 +201,30 @@ def similarity(csv_txn: Txn, sage_txn: Txn) -> int:
     return max(len(a & tokens(sage_txn.description)), len(a & tokens(sage_txn.comment)))
 
 
+def distinctive(text: str) -> set[str]:
+    """Alphabetic words of four letters or more that are not stopwords. Letters and
+    digits split apart, so 'Plumblink08H35' yields 'plumblink'."""
+    return {w for w in re.findall(r"[a-z]+|[0-9]+", (text or "").lower())
+            if len(w) >= 4 and w.isalpha() and w not in STOPWORDS}
+
+
+def evidence(csv_txn: Txn, sage_txn: Txn) -> list[str]:
+    """Why a same-date, same-amount pair is more than a coincidence: distinctive words
+    the bank text shares with Sage's description or name, or one text found whole
+    inside the other. Empty means the pair rests on date and amount alone."""
+    shared = distinctive(csv_txn.description) & (distinctive(sage_txn.description)
+                                                | distinctive(sage_txn.comment))
+    found = sorted(shared)
+    c_norm = normalise(csv_txn.description)
+    for text in (sage_txn.description, sage_txn.comment):
+        s_norm = normalise(text)
+        if len(s_norm) < 5 or s_norm in STOPWORDS or s_norm in found or len(c_norm) < 5:
+            continue
+        if (s_norm in c_norm or c_norm in s_norm) and text.strip() not in found:
+            found.append(text.strip())
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Window
 # ---------------------------------------------------------------------------
@@ -245,17 +290,23 @@ def reconcile(csv_parsed: Parsed, sage_parsed: Parsed,
                 claim(TIER_EXACT, [c], [s])
                 break
 
-    # Pass 2: amount only, best description overlap, file order on ties.
+    # Pass 2: same date and amount. Name evidence makes it a "Name" match; none
+    # makes it "Amount only", for review. Best evidence, then overlap, then file order.
     for c in csv_in:
         if c.key not in csv_free:
             continue
         cands = sage_candidates(c.date, c.cents)
         if not cands:
             continue
-        best = max(cands, key=lambda s: (similarity(c, s), -s.row))
+        best = max(cands, key=lambda s: (len(evidence(c, s)), similarity(c, s), -s.row))
+        found = evidence(c, best)
         shown = best.comment if best.comment and best.comment != best.description else best.description
-        claim(TIER_AMOUNT, [c], [best],
-              note=f"Descriptions differ. CSV: {c.description}. Sage: {shown}.")
+        if found:
+            claim(TIER_NAME, [c], [best],
+                  note=f"Same date and amount, shared: {', '.join(found)}. Sage: {shown}.")
+        else:
+            claim(TIER_AMOUNT, [c], [best],
+                  note=f"Descriptions differ. CSV: {c.description}. Sage: {shown}.")
 
     # Pass 3a: one CSV line = several Sage lines sharing a reference on that date.
     # Lines with no reference are never grouped: a description is too weak a key
@@ -315,6 +366,8 @@ def reconcile(csv_parsed: Parsed, sage_parsed: Parsed,
         matches=matches, missing_in_sage=missing, extra_in_sage=extra,
         csv_skipped=list(csv_parsed.skipped), sage_skipped=list(sage_parsed.skipped),
         sign_flip_hint=sign_flip_hint,
+        sage_account=sage_parsed.account, sage_opening=sage_parsed.opening,
+        sage_closing=sage_parsed.closing, sage_integrity_ok=sage_parsed.integrity_ok,
     )
 
 

@@ -1,0 +1,24 @@
+sep=,
+"Bank Account
+                            Date","Payee","Description","Reference","Transaction Type","Account / Customer / Supplier","Debit","Credit","Balance"
+"8400/000 : Test Bank - 1234",,,,,,,,
+"Opening Balance as at:  01/08/2026",,,,,,"1000",,
+"01/08/2026",,"ACME HARDWARE ib payment","20260801-0001","Account Payment","Repairs",,"1500","-500"
+"01/08/2026",,"20260801-0002","PAY0000001","Supplier Payment","Acme Hardware",,"1500","-2000"
+"01/08/2026",,"0108 honouring fee","20260801-0003","Account Payment","Bank Charges",,"155","-2155"
+"01/08/2026",,"0108 honouring fee","20260801-0004","Account Payment","Bank Charges",,"155","-2310"
+"02/08/2026",,"Electricity","20260802-0001","Account Payment","Electricity",,"500","-2810"
+"02/08/2026",,"RENT AUGUST ib payment","20260802-0003","Account Payment","Rent",,"6000","-8810"
+"02/08/2026",,"20260802-0003","PAY0000002","Supplier Payment","Landlord Props",,"3000","-11810"
+"03/08/2026",,"Immediate payment fees","20260803-0001","Account Payment","Bank Charges",,"90","-11900"
+"04/08/2026",,"20260804-0001","REC0000001","Customer Receipt","Sales Customer","2500",,"-9400"
+"05/08/2026",,"STATIONERY debit card purchase","20260805-0001","Account Payment","Stationery",,"80","-9480"
+"10/08/2026",,"LATE LINE service fee","20260810-0001","Account Payment","Bank Charges",,"99","-9579"
+"Closing Balance as at:  31/08/2026",,,,,,,"9579",
+"Movement for the period",,,,,,,"10579",
+"8500/000 : Petty Cash",,,,,,,,
+"Opening Balance as at:  01/08/2026",,,,,,"200",,
+"02/08/2026",,"Cash float top up","20260802-0009","Account Receipt","Transfer control","300",,"500"
+"Closing Balance as at:  31/08/2026",,,,,,"500",,
+"Movement for the period",,,,,,"300",,
+"Grand Total:",,,,,,,"9079",

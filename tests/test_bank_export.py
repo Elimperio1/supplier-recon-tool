@@ -5,7 +5,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from bankrecon.engine import reconcile
-from bankrecon.export import workbook_bytes
+from bankrecon.export import missing_csv_bytes, missing_csv_filename, workbook_bytes
 from bankrecon.parse import SIDE_CSV, SIDE_SAGE, parse_file
 
 FIX = Path(__file__).parent / "fixtures"
@@ -65,3 +65,16 @@ def test_marked_sheets_carry_every_input_row():
     assert sage_status[-1] == "Outside window"
     # Rows keep their file order and line numbers.
     assert [r[0] for r in csv_marked[1:]] == list(range(6, 18))
+
+
+def test_missing_csv_follows_the_csv_parser_layout():
+    result = _result()
+    raw = missing_csv_bytes(result)
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    lines = raw.decode("utf-8").split("\r\n")
+    assert lines[0] == "Date,Description,Amount"
+    assert lines[1:] == [f"{t.date:%d/%m/%Y},{t.description},{t.cents / 100:.2f}"
+                         for t in result.missing_in_sage] + [""]
+    assert [line.rsplit(",", 1)[1] for line in lines[1:-1]] == ["-155.00", "2500.00", "1200.00"]
+    assert missing_csv_filename(result).startswith("Missing_in_Sage_")
+    assert missing_csv_filename(result).endswith(".csv")

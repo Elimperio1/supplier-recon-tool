@@ -8,6 +8,7 @@ with two decimals and dates as real dates.
 
 from __future__ import annotations
 
+import csv
 import io
 from datetime import date
 
@@ -16,7 +17,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from .engine import (STATUS_AMOUNT, STATUS_DATE, STATUS_EXTRA, STATUS_MATCHED,
-                     STATUS_MISSING, STATUS_OUTSIDE, STATUS_SPLIT, Match, Result, Txn)
+                     STATUS_MISSING, STATUS_NAME, STATUS_OUTSIDE, STATUS_SPLIT, Match, Result,
+                     Txn)
 
 FILL_RED = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
 FILL_AMBER = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
@@ -26,6 +28,7 @@ FILL_HEAD = PatternFill(start_color="1D1D1F", end_color="1D1D1F", fill_type="sol
 
 STATUS_FILL = {
     STATUS_MATCHED: FILL_GREEN,
+    STATUS_NAME: FILL_GREEN,
     STATUS_AMOUNT: FILL_AMBER,
     STATUS_SPLIT: FILL_AMBER,
     STATUS_DATE: FILL_AMBER,
@@ -120,6 +123,16 @@ def workbook_bytes(result: Result) -> bytes:
         ["Sage rows skipped", len(result.sage_skipped)],
         ["Proof: missing minus extra equals difference", "PASS" if result.proof_ok else "FAIL"],
     ]
+    if result.sage_account:
+        foots = {True: "PASS", False: "FAIL", None: "no balances in the file"}[result.sage_integrity_ok]
+        summary += [
+            ["Sage account", result.sage_account],
+            ["Sage opening balance (whole file)",
+             _money(result.sage_opening) if result.sage_opening is not None else ""],
+            ["Sage closing balance (whole file)",
+             _money(result.sage_closing) if result.sage_closing is not None else ""],
+            ["Sage report foots: opening plus every line equals closing", foots],
+        ]
     _write_table(ws, ["Item", "Value"], summary)
 
     ws = wb.create_sheet("Missing in Sage")
@@ -160,3 +173,21 @@ def workbook_bytes(result: Result) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def missing_csv_bytes(result: Result) -> bytes:
+    """Missing in Sage lines in the CSV Parser's own layout, so Sage imports it as a bank
+    statement: Date, Description, Amount; dd/mm/yyyy; signed amount; csv.writer defaults
+    (CRLF rows); UTF-8 without a BOM. Mirrors rows_to_csv_bytes in the CSV Parser."""
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["Date", "Description", "Amount"])
+    for t in result.missing_in_sage:
+        writer.writerow([f"{t.date:%d/%m/%Y}", t.description, f"{t.cents / 100:.2f}"])
+    return out.getvalue().encode("utf-8")
+
+
+def missing_csv_filename(result: Result) -> str:
+    # The CSV Parser's pattern, <name>_<ddMonYYYY>_to_<ddMonYYYY>.csv, over the rows' own dates.
+    dates = [t.date for t in result.missing_in_sage] or [result.window.start, result.window.end]
+    return f"Missing_in_Sage_{min(dates):%d%b%Y}_to_{max(dates):%d%b%Y}.csv"

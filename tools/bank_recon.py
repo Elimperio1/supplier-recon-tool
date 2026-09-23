@@ -18,8 +18,8 @@ import pandas as pd
 import streamlit as st
 
 from bankrecon.engine import Result, Window, auto_window, rand, reconcile
-from bankrecon.export import workbook_bytes
-from bankrecon.parse import SIDE_CSV, SIDE_SAGE, Parsed, ParseError, parse_file
+from bankrecon.export import missing_csv_bytes, missing_csv_filename, workbook_bytes
+from bankrecon.parse import FORMAT_SECTIONED, SIDE_CSV, SIDE_SAGE, Parsed, ParseError, parse_file
 from ui import tiles
 
 
@@ -40,9 +40,9 @@ def show(df: pd.DataFrame, **config) -> None:
     st.dataframe(df, width="stretch", hide_index=True, column_config=config)
 
 
-def _load(uploaded, side: str) -> Parsed | None:
+def _load(uploaded, side: str, account: str | None = None) -> Parsed | None:
     try:
-        return parse_file(uploaded.getvalue(), side)
+        return parse_file(uploaded.getvalue(), side, account)
     except ParseError as exc:
         st.error(f"{uploaded.name}: {exc}")
         return None
@@ -73,18 +73,27 @@ def match_frame(matches) -> pd.DataFrame:
 
 c1, c2 = st.columns(2)
 csv_file = c1.file_uploader("Bank CSV from the CSV tool (source of truth)", type="csv", key="bank_csv")
-sage_file = c2.file_uploader("Sage bank transactions export", type="csv", key="bank_sage")
+sage_file = c2.file_uploader("Sage export: Bank Transactions, or the Banks and Credit Cards report",
+                             type="csv", key="bank_sage")
 
 if csv_file is None or sage_file is None:
     st.markdown('<div class="empty"><div class="empty__t">Upload both files to compare</div>'
-                '<div class="empty__s">The Sage export needs Date, Description and Total. '
-                'Its other columns are ignored.</div></div>', unsafe_allow_html=True)
+                '<div class="empty__s">The Sage file is either the Bank Transactions export '
+                '(Date, Description, Total) or the Banks and Credit Cards Transactions Report '
+                '(Debit and Credit, one section per account). Other columns are ignored.'
+                '</div></div>', unsafe_allow_html=True)
     st.stop()
 
 csv_parsed = _load(csv_file, SIDE_CSV)
 sage_parsed = _load(sage_file, SIDE_SAGE)
 if csv_parsed is None or sage_parsed is None:
     st.stop()
+
+if len(sage_parsed.accounts) > 1:
+    account = st.selectbox("Bank account in the Sage report", sage_parsed.accounts, key="bank_account")
+    sage_parsed = _load(sage_file, SIDE_SAGE, account)
+    if sage_parsed is None:
+        st.stop()
 
 for label, parsed in (("Bank CSV", csv_parsed), ("Sage export", sage_parsed)):
     if not parsed.txns:
@@ -135,6 +144,18 @@ st.caption(f"Missing in Sage {rand(result.missing_total)} minus extra in Sage "
            f"{rand(result.extra_total)} equals the difference {rand(result.difference)}: {proof}.")
 if not result.proof_ok:
     st.error("The proof failed. Do not rely on these lists. Report this with the two files.")
+if sage_parsed.format == FORMAT_SECTIONED:
+    if result.sage_integrity_ok is None:
+        st.caption(f"Sage account {result.sage_account}. The report carries no opening or "
+                   "closing balance, so it cannot be footed.")
+    elif result.sage_integrity_ok:
+        st.caption(f"Sage account {result.sage_account}. Opening {rand(result.sage_opening)} plus "
+                   f"every line in the file equals the closing {rand(result.sage_closing)}: PASS.")
+    else:
+        st.warning(f"Sage account {result.sage_account}: opening {rand(result.sage_opening)} plus "
+                   f"every line in the file gives {rand(result.sage_opening + sage_parsed.movement)}, "
+                   f"but the report says closing {rand(result.sage_closing)}. The export is "
+                   "incomplete or was read wrongly. Check it before acting on the lists.")
 if result.sign_flip_hint:
     st.warning("The signs look inverted between the two files: flipping the bank CSV amounts "
                "would match more lines than the amounts as given. Check the sign convention "
@@ -146,7 +167,11 @@ if skipped:
             for row, why in rows:
                 st.write(f"{label}, row {row}: {why}")
 
-_, dcol = st.columns([3, 1])
+_, ccol, dcol = st.columns([2, 1, 1])
+if result.missing_in_sage:
+    ccol.download_button("Missing in Sage CSV for Sage import", data=missing_csv_bytes(result),
+                         file_name=missing_csv_filename(result), mime="text/csv",
+                         width="stretch")
 dcol.download_button("Download Excel", data=workbook_bytes(result),
                      file_name=f"bank_recon_{start:%Y%m%d}_{end:%Y%m%d}.xlsx",
                      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
