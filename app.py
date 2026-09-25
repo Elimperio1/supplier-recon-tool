@@ -19,6 +19,15 @@ from ui import hero, inject_css
 st.set_page_config(page_title="Recon Toolbox", layout="wide",
                    initial_sidebar_state="collapsed")
 
+# Nobody reaches this tool except through the practice-management app's Tools
+# menu, which mints a 120-second signed link. Must stay directly under
+# set_page_config and above everything else, including st.navigation: anything
+# placed earlier runs for a visitor who never signed in. It covers both tools,
+# because every page runs through this entry point.
+from app_link import require_app_link  # noqa: E402
+
+require_app_link()
+
 TOOLS = [
     st.Page("tools/supplier_recon.py", title="Supplier Recon", url_path="supplier", default=True),
     st.Page("tools/bank_recon.py", title="Bank Recon", url_path="bank"),

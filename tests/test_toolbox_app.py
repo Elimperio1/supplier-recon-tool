@@ -1,6 +1,7 @@
 """House rules for every screen file, plus a smoke run of both tools with no uploads."""
 
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,8 @@ def test_entry_renders_supplier_recon_by_default():
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_file(str(ROOT / "app.py"))
+    # Stand in for a session that already arrived through a signed app link.
+    at.session_state["_app_link_until"] = time.time() + 60
     at.run(timeout=60)
     assert not at.exception
     assert "Recon Toolbox" in _markdown(at)
