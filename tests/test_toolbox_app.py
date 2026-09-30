@@ -61,3 +61,41 @@ def test_bank_recon_page_renders_empty_state():
     at.run(timeout=60)
     assert not at.exception
     assert "Upload both files to compare" in _markdown(at)
+
+
+def test_gate_open_through_the_named_day_only():
+    from datetime import date
+
+    from app_link import gate_open
+
+    today = date(2026, 9, 30)
+    assert gate_open("2026-09-30", today)
+    assert gate_open(" 2026-10-02 ", today)
+    assert not gate_open("2026-09-29", today)
+    for junk in ("", "yes", "true", "30/09/2026", None):
+        assert not gate_open(junk, today), junk
+
+
+def _entry_with_gate_until(until: str):
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(ROOT / "app.py"))
+    at.secrets["TOOL_GATE_OPEN_UNTIL"] = until
+    at.secrets["APP_ORIGIN"] = "https://app.invalid"
+    at.run(timeout=60)
+    assert not at.exception
+    return at
+
+
+def test_open_date_lets_a_visitor_in_without_a_link():
+    from datetime import datetime
+
+    from app_link import SAST
+
+    at = _entry_with_gate_until(datetime.now(SAST).date().isoformat())
+    assert "Recon Toolbox" in _markdown(at)
+
+
+def test_past_date_keeps_the_gate_shut():
+    at = _entry_with_gate_until("2000-01-01")
+    assert "Recon Toolbox" not in _markdown(at)

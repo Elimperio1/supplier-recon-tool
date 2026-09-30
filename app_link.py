@@ -30,6 +30,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import date, datetime, timedelta, timezone
 
 import streamlit as st
 
@@ -42,6 +43,13 @@ SLUG = "recon"
 # How long a verified entry lasts before a silent re-mint. Bounds how long a
 # disabled account keeps working in a tab that is already open.
 SESSION_SECONDS = 1800  # 30 minutes
+
+# Break-glass for when the app cannot mint links (an outage, or a temp hire with
+# no profile yet): TOOL_GATE_OPEN_UNTIL = "YYYY-MM-DD" in Streamlit secrets opens
+# the tool to anyone with the URL through the end of that day, SAST. A date is
+# used rather than a flag so a forgotten switch closes itself. Anything that is
+# not a valid date keeps the gate shut.
+SAST = timezone(timedelta(hours=2))  # South Africa has no daylight saving
 
 
 def _b64d(s: str) -> bytes:
@@ -91,8 +99,19 @@ def _bounce(url: str) -> None:
     st.stop()
 
 
+def gate_open(until: object, today: date) -> bool:
+    """True when `until` is an ISO date on or after `today`."""
+    try:
+        return date.fromisoformat(str(until).strip()) >= today
+    except ValueError:
+        return False
+
+
 def require_app_link() -> None:
     """Stop the script unless this session arrived through the app."""
+    if gate_open(st.secrets.get("TOOL_GATE_OPEN_UNTIL", ""), datetime.now(SAST).date()):
+        return
+
     if st.session_state.get("_app_link_until", 0) > time.time():
         return
 
