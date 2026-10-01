@@ -31,6 +31,7 @@ require_app_link()
 TOOLS = [
     st.Page("tools/supplier_recon.py", title="Supplier Recon", url_path="supplier", default=True),
     st.Page("tools/bank_recon.py", title="Bank Recon", url_path="bank"),
+    st.Page("tools/loan_recon.py", title="Loan Recon", url_path="loan"),
 ]
 BY_TITLE = {page.title: page for page in TOOLS}
 

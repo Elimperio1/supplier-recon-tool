@@ -10,6 +10,7 @@ ROOT = Path(__file__).parent.parent
 SCREEN_FILES = [ROOT / "app.py", ROOT / "ui.py",
                 *sorted((ROOT / "tools").glob("*.py")),
                 *sorted((ROOT / "bankrecon").glob("*.py")),
+                *sorted((ROOT / "loanrecon").glob("*.py")),
                 *sorted((ROOT / "recon").glob("*.py"))]
 
 BANNED_CHARS = re.compile("[–—️☀-➿\U0001f300-\U0001faff]")
@@ -99,3 +100,12 @@ def test_open_date_lets_a_visitor_in_without_a_link():
 def test_past_date_keeps_the_gate_shut():
     at = _entry_with_gate_until("2000-01-01")
     assert "Recon Toolbox" not in _markdown(at)
+
+
+def test_loan_recon_page_renders_empty_state():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(ROOT / "tools" / "loan_recon.py"))
+    at.run(timeout=60)
+    assert not at.exception
+    assert "Upload both ledgers" in _markdown(at)
