@@ -1,6 +1,6 @@
 # Recon Toolbox
 
-One Streamlit app, two reconciliation tools, a segmented control at the top of
+One Streamlit app, three reconciliation tools, a segmented control at the top of
 the page to pick one. No sidebar.
 
 - **Supplier Recon**: Sage Business Cloud supplier ledgers against the bank
@@ -11,13 +11,17 @@ the page to pick one. No sidebar.
 - **Bank Recon**: the CSV Parser's bank CSV (the source of truth) against a Sage
   bank transactions export, over the dates both files cover: what is missing in
   Sage, what is extra. Spec in [`docs/BANK_RECON.md`](docs/BANK_RECON.md).
+- **Loan Recon**: two companies' ledger exports (Sage or Pastel) for an
+  intercompany loan. A debit in one pairs with a credit of the same amount in the
+  other: same day is matched, within the date tolerance is to review, the rest is
+  unmatched. Shows each side's net and the difference. Moved here from the CSV
+  Parser app.
 
-**No AI/LLM matching. No Sage API. No writes to Sage.** Both tools.
+**No AI/LLM matching. No Sage API. No writes to Sage.** All tools.
 
 Adding a tool: one `st.Page` line in `TOOLS` in `app.py` plus a page under
 `tools/` that renders its inputs on the page, imports the design layer from
-`ui.py`, and never calls `st.set_page_config` or `st.sidebar`. The CSV Parser's
-loan reconciliation page is the next candidate.
+`ui.py`, and never calls `st.set_page_config` or `st.sidebar`.
 
 ## Supplier Recon: what it does
 
@@ -42,6 +46,7 @@ app.py                   Recon Toolbox entry: page config, design layer, tool sw
 ui.py                    shared design layer (CSS, hero, stat tiles)
 tools/supplier_recon.py  Supplier Recon page (renders only)
 tools/bank_recon.py      Bank Recon page (renders only)
+tools/loan_recon.py      Loan Recon page (renders only)
 recon/parse.py           Sage CSV -> dataclasses (both supplier reports); integer cents
 recon/aliases.py         alias derivation + text normalisation
 recon/engine.py          classification, within/cross-supplier pairing
@@ -51,12 +56,15 @@ recon/export.py          Excel workbook builder
 bankrecon/parse.py       bank CSV + Sage bank export -> transactions in integer cents
 bankrecon/engine.py      window, matching passes, proof
 bankrecon/export.py      Excel workbook builder
+loanrecon/parse.py       Sage / Pastel ledger CSV -> signed transactions in integer cents
+loanrecon/engine.py      same-day and within-tolerance matching, nets, difference
+loanrecon/export.py      Excel workbook builder
 tests/                   supplier fixtures per §8 trap + golden numbers (§9);
-                         test_bank_*.py for Bank Recon; test_toolbox_app.py house rules + smoke
+                         test_bank_*.py for Bank Recon; test_loan_engine.py for Loan Recon; test_toolbox_app.py house rules + smoke
 ```
 
 Engine functions take parsed data and return plain dataclasses; the pages and the
-Excel exports are renderers over the same result. `recon/` and `bankrecon/` are
+Excel exports are renderers over the same result. `recon/`, `bankrecon/` and `loanrecon/` are
 pure stdlib except the leaf modules that need `gspread` (sheets) and `openpyxl`
 (export). Streamlit is imported only by `app.py`, `ui.py` and `tools/`.
 
