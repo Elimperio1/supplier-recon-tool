@@ -333,11 +333,13 @@ App
 - [ ] Ledger keeps the report's own **Balance** column, and the opening/closing
       bands sit in it, so the running balance reads as one continuous column
 - [ ] **Non-zero Ledger** sheet, straight after Ledger: the same layout, only the
-      accounts whose closing balance is not R0. With "Exclude months from Non-zero
-      Ledger" ticked, the picked months' rows leave this sheet, the closing band
-      becomes the report's closing less those rows, and an account that is R0 on
-      that figure leaves the sheet. The picker starts on the report's latest month.
-      The full Ledger sheet is never filtered
+      accounts whose closing balance is not R0
+- [ ] **Exclude months** checkbox beside the download button opens a month picker
+      (starts on the report's latest month). The picked months leave the whole
+      workbook: both reports lose those rows (`parse.without_months`), each
+      account's closing moves by the same amount, and the workbook is built from
+      a fresh analysis of what is left. Closing bands read "Closing balance excl.
+      Mar 2026, ...". The tabs on screen keep the full report
 - [ ] Ledger: amber Description = counterpart >30 days away, grade unchanged
 - [ ] `dayfirst` dates in any display parsing; future-dated closing rows kept
 

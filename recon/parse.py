@@ -17,7 +17,7 @@ import csv
 import io
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional, Union
 
@@ -328,3 +328,43 @@ def parse_bank_report(source: Source) -> BankReport:
     for a in report.accounts:
         a.recomputed_closing = a.opening + sum(t.signed for t in a.txns)
     return report
+
+
+# ---------------------------------------------------------------------------
+# Month exclusion
+# ---------------------------------------------------------------------------
+
+def month_of(date: str) -> Optional[str]:
+    """``DD/MM/YYYY`` -> ``YYYY-MM``; None when the date does not read."""
+    date = (date or "").strip()
+    if not DATE_RE.match(date) or not 1 <= int(date[3:5]) <= 12:
+        return None
+    return f"{date[6:]}-{date[3:5]}"
+
+
+def report_months(report: SupplierReport) -> list[str]:
+    """Every month (``YYYY-MM``) holding a dated transaction, oldest first."""
+    return sorted({m for s in report.suppliers for t in s.txns
+                   if (m := month_of(t.date)) is not None})
+
+
+def without_months(report, months):
+    """A copy of a supplier or bank report with every transaction dated in
+    ``months`` (``YYYY-MM``) taken out. Each account's reported closing and its
+    recomputed closing move by the same amount, so the integrity check reads
+    exactly as it did. A row whose date does not read is kept."""
+    months = frozenset(months)
+    if not months:
+        return report
+    is_supplier = isinstance(report, SupplierReport)
+    accounts = []
+    for a in (report.suppliers if is_supplier else report.accounts):
+        kept, dropped = [], 0
+        for t in a.txns:
+            if month_of(t.date) in months:
+                dropped += t.signed
+            else:
+                kept.append(t)
+        accounts.append(replace(a, txns=kept, closing=a.closing - dropped,
+                                recomputed_closing=a.recomputed_closing - dropped))
+    return replace(report, suppliers=accounts) if is_supplier else replace(report, accounts=accounts)

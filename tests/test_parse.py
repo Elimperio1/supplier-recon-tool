@@ -143,3 +143,51 @@ def test_duplicate_supplier_names_kept_separate_and_warned():
     assert {s.closing for s in dups} == {1000, 2000}
     assert all(s.duplicate for s in dups)
     assert "Dup Co" in r.duplicate_names
+
+
+def test_without_months_moves_closing_and_keeps_integrity():
+    from recon.parse import Supplier, SupplierReport, SupplierTxn, without_months
+
+    txns = [SupplierTxn("A Co", "05/03/2026", "I1", "Supplier Invoice", "", None, 5000, "", 0),
+            SupplierTxn("A Co", "07/04/2026", "I2", "Supplier Invoice", "", None, 3000, "", 1),
+            SupplierTxn("A Co", "09/04/2026", "P1", "Supplier Payment", "", 1000, None, "", 2),
+            SupplierTxn("A Co", "n/a", "I3", "Supplier Invoice", "", None, 700, "", 3)]
+    # Reported closing is 1 cent off the recomputed one, so integrity fails.
+    report = SupplierReport(suppliers=[Supplier("A Co", 100, 7801, txns, recomputed_closing=7800)])
+
+    cut = without_months(report, ["2026-04"]).suppliers[0]
+    assert [t.reference for t in cut.txns] == ["I1", "I3"]
+    assert (cut.closing, cut.recomputed_closing) == (5801, 5800)
+    assert cut.integrity_delta == report.suppliers[0].integrity_delta == -1
+    assert len(report.suppliers[0].txns) == 4          # the original is untouched
+    assert without_months(report, []) is report
+
+
+def test_without_months_filters_a_bank_report():
+    from recon.parse import BankAccount, BankReport, BankTxn, without_months
+
+    def txn(date, debit, credit, i):
+        return BankTxn("FNB", i, date, "", "", "", "", "", debit, credit, "")
+
+    report = BankReport(accounts=[BankAccount("FNB", 0, 4000,
+                                              [txn("01/03/2026", 9000, None, 0),
+                                               txn("02/04/2026", None, 5000, 1)],
+                                              recomputed_closing=4000)])
+    cut = without_months(report, ["2026-04"]).accounts[0]
+    assert [t.row_index for t in cut.txns] == [0]
+    assert (cut.closing, cut.recomputed_closing) == (9000, 9000)
+
+
+def test_report_months_lists_dated_months_oldest_first():
+    from recon.export import month_label
+    from recon.parse import Supplier, SupplierReport, SupplierTxn, report_months
+
+    def txn(date, i):
+        return SupplierTxn("A Co", date, "R", "Supplier Invoice", "", None, 100, "", i)
+
+    report = SupplierReport(suppliers=[
+        Supplier("A Co", 0, 0, [txn("05/04/2026", 0), txn("n/a", 1), txn("31/13/2026", 2)]),
+        Supplier("B Co", 0, 0, [txn("28/12/2025", 3), txn("06/04/2026", 4)])])
+    months = report_months(report)
+    assert months == ["2025-12", "2026-04"]
+    assert [month_label(m) for m in months] == ["Dec 2025", "Apr 2026"]

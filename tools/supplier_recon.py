@@ -31,7 +31,7 @@ from ui import esc, tiles
 # class identity, missing dataclass field, ImportError on a new name). If the
 # in-memory engine's version is not the one this app.py was written against,
 # purge every recon module and re-import fresh.
-_EXPECTED_ENGINE_VERSION = 9
+_EXPECTED_ENGINE_VERSION = 10
 
 import recon.engine as _engine_mod  # noqa: E402
 
@@ -47,8 +47,8 @@ from recon.engine import (AGING_ALERT_DAYS, CAT_GREEN, CAT_INVOICES, CAT_PAYMENT
 from recon.match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE,
                          account_payment_index, match_supplier)
 from recon.parse import (BankReport, SupplierReport, parse_bank_report,
-                         parse_supplier_report)
-from recon.export import ledger_months, month_label, workbook_bytes
+                         parse_supplier_report, report_months, without_months)
+from recon.export import month_label, workbook_bytes
 from recon import sheets as sheets_mod
 
 
@@ -98,8 +98,18 @@ def _parse_bank(data: bytes, version: int) -> BankReport:
 
 @st.cache_data(show_spinner=False)
 def _analyze(supplier_bytes: bytes, version: int,
-             manual_patterns: dict[str, list[str]]) -> EngineResult:
-    return analyze(parse_supplier_report(supplier_bytes), manual_patterns)
+             manual_patterns: dict[str, list[str]],
+             exclude_months: tuple[str, ...] = ()) -> EngineResult:
+    return analyze(without_months(parse_supplier_report(supplier_bytes), exclude_months),
+                   manual_patterns)
+
+
+def _bank_matches(engine: EngineResult, bank_report, manual) -> dict[str, list]:
+    if bank_report is None:
+        return {}
+    index = account_payment_index(bank_report)
+    return {res.name: match_supplier(res, index, manual.get(res.name, []))
+            for res in engine.by_category(CAT_PAYMENTS)}
 
 
 # ---------------------------------------------------------------------------
@@ -217,12 +227,7 @@ manual = _manual_patterns(aliases, client)
 supplier_report = _parse_supplier(supplier_bytes, _CACHE_VERSION)
 engine = _analyze(supplier_bytes, _CACHE_VERSION, manual)
 bank_report = _parse_bank(bank_bytes, _CACHE_VERSION) if bank_bytes is not None else None
-bank_index = account_payment_index(bank_report) if bank_report else {}
-
-matches: dict[str, list] = {}
-if bank_report is not None:
-    for res in engine.by_category(CAT_PAYMENTS):
-        matches[res.name] = match_supplier(res, bank_index, manual.get(res.name, []))
+matches = _bank_matches(engine, bank_report, manual)
 
 greens = engine.by_category(CAT_GREEN)
 pays = engine.by_category(CAT_PAYMENTS)
@@ -239,16 +244,27 @@ tiles([
     ("Integrity issues", str(n_integ), "green" if n_integ == 0 else "red"),
 ])
 
-xcol, dcol = st.columns([3, 1])
+# Excluded months leave the whole workbook (both reports, re-analysed without
+# them); the tabs on this page keep the full report.
+_, xcol, dcol = st.columns([2, 1, 1], vertical_alignment="center")
 _exclude: list[str] = []
-if xcol.checkbox("Exclude months from Non-zero Ledger", key="nz_exclude"):
-    _months = ledger_months(engine)
+if xcol.checkbox("Exclude months", key="exclude_months"):
+    _months = report_months(supplier_report)
+    _, pcol = st.columns([2, 2])
     # Keyed on the upload so a new report starts again on its own latest month.
-    _exclude = xcol.multiselect("Months to exclude", _months, default=_months[-1:],
-                                format_func=month_label, key=f"nz_months_{_sig}")
+    _exclude = pcol.multiselect("Months to exclude", _months, default=_months[-1:],
+                                format_func=month_label, key=f"exclude_months_{_sig}")
+if _exclude:
+    _x = tuple(sorted(_exclude))
+    wb_supplier = without_months(supplier_report, _x)
+    wb_engine = _analyze(supplier_bytes, _CACHE_VERSION, manual, _x)
+    wb_bank = without_months(bank_report, _x) if bank_report is not None else None
+    wb_matches = _bank_matches(wb_engine, wb_bank, manual)
+else:
+    wb_supplier, wb_engine, wb_bank, wb_matches = supplier_report, engine, bank_report, matches
 dcol.download_button(
     "Download Excel workbook",
-    data=workbook_bytes(client or "client", engine, matches, supplier_report, bank_report,
+    data=workbook_bytes(client or "client", wb_engine, wb_matches, wb_supplier, wb_bank,
                         exclude_months=_exclude),
     file_name=f"supplier_recon_{(client or 'client').strip().replace(' ', '_') or 'client'}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

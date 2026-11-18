@@ -4,7 +4,7 @@ the per-account Totals band and the amber aging flag on the description."""
 
 from recon.engine import analyze
 from recon.export import AMBER_FILL, build_workbook
-from recon.parse import Supplier, SupplierReport, SupplierTxn
+from recon.parse import Supplier, SupplierReport, SupplierTxn, without_months
 
 
 def _inv(name, ref, cents, date, ri, desc="", bal=""):
@@ -110,48 +110,57 @@ def test_non_zero_ledger_holds_only_accounts_not_closing_at_zero():
 def _excluding(months):
     # Settles Co: March nets to zero, April invoice still open.
     # Late Co: February invoice still open, April invoice on top.
-    # Odd Co: a row whose date does not parse, so no month can exclude it.
-    settles = Supplier("Settles Co", 0, 3000, [
-        _inv("Settles Co", "I1", 5000, "02/03/2026", 0),
-        _pay("Settles Co", "P1", 5000, "09/03/2026", 1),
-        _inv("Settles Co", "I2", 3000, "05/04/2026", 2, desc="april invoice")])
-    late = Supplier("Late Co", 0, 5000, [
-        _inv("Late Co", "I1", 4000, "10/02/2026", 3, desc="february invoice"),
-        _inv("Late Co", "I2", 1000, "11/04/2026", 4, desc="april invoice")])
-    odd = Supplier("Odd Co", 0, 2000, [_inv("Odd Co", "I1", 2000, "n/a", 5, desc="undated")])
-    report = SupplierReport(suppliers=[settles, late, odd])
+    # Paid Co: an April payment with no invoice.
+    # Odd Co: a row whose date does not read, so no month can exclude it.
+    report = SupplierReport(suppliers=[
+        Supplier("Settles Co", 0, 3000, [
+            _inv("Settles Co", "I1", 5000, "02/03/2026", 0),
+            _pay("Settles Co", "P1", 5000, "09/03/2026", 1),
+            _inv("Settles Co", "I2", 3000, "05/04/2026", 2, desc="april invoice")]),
+        Supplier("Late Co", 0, 5000, [
+            _inv("Late Co", "I1", 4000, "10/02/2026", 3, desc="february invoice"),
+            _inv("Late Co", "I2", 1000, "11/04/2026", 4, desc="april invoice")]),
+        Supplier("Paid Co", 0, -2000, [
+            _pay("Paid Co", "P1", 2000, "15/04/2026", 5, desc="april payment")]),
+        Supplier("Odd Co", 0, 2000, [_inv("Odd Co", "I1", 2000, "n/a", 6, desc="undated")])])
+    report = without_months(report, months)
     return build_workbook("Client", analyze(report), {}, report, exclude_months=months)
 
 
-def test_excluded_month_drops_rows_and_retests_the_balance():
-    ws = _excluding(["2026-04"])["Non-zero Ledger"]
-    rows = _rows(ws)
-    # Settles Co is R0 once April is out, so it leaves the sheet.
-    assert _names(ws) == ["Late Co", "Odd Co"]
-    descs = [r[4] for r in rows]
-    assert "april invoice" not in descs
-    assert {"february invoice", "undated"} <= set(descs)
-    closing = {r[0]: r[7] for r in rows if r[4] == "Closing balance excl. Apr 2026"}
-    assert closing == {"Late Co": 40.00, "Odd Co": 20.00}
-    totals = [(r[5], r[6]) for r in rows if r[4] == "Totals"]
+def test_excluded_months_leave_both_ledger_sheets():
+    for sheet in ("Ledger", "Non-zero Ledger"):
+        descs = {r[4] for r in _rows(_excluding(["2026-04"])[sheet])}
+        assert not {"april invoice", "april payment"} & descs, sheet
+        assert {"february invoice", "undated"} <= descs, sheet
+
+    wb = _excluding(["2026-04"])
+    label = "Closing balance excl. Apr 2026"
+    closing = {r[0]: r[7] for r in _rows(wb["Ledger"]) if r[4] == label}
+    assert closing == {"Settles Co": 0.00, "Late Co": 40.00, "Paid Co": 0.00, "Odd Co": 20.00}
+    # Settles Co and Paid Co are R0 once April is out.
+    assert _names(wb["Non-zero Ledger"]) == ["Late Co", "Odd Co"]
+    totals = [(r[5], r[6]) for r in _rows(wb["Non-zero Ledger"]) if r[4] == "Totals"]
     assert totals == [(0.00, 40.00), (0.00, 20.00)]
 
 
-def test_excluding_months_leaves_the_full_ledger_alone():
-    assert _rows(_excluding(["2026-04"])["Ledger"]) == _rows(_excluding([])["Ledger"])
-    assert _names(_excluding([])["Non-zero Ledger"]) == ["Settles Co", "Late Co", "Odd Co"]
+def test_excluded_months_leave_the_other_sheets():
+    def summary(wb):
+        return {r[0]: (r[1], r[2]) for r in _rows(wb["Summary"])[1:]}
+
+    def invoices_needed(wb):
+        return [r[0] for r in _rows(wb["Invoices Needed"])[1:]]
+
+    full, cut = _excluding([]), _excluding(["2026-04"])
+    assert summary(full)["Settles Co"] == (30.00, "PAYMENTS NEEDED")
+    assert summary(cut)["Settles Co"] == (0.00, "GREEN")
+    assert invoices_needed(full) == ["Paid Co"]
+    assert invoices_needed(cut) == []
 
 
-def test_ledger_months_lists_dated_months_oldest_first():
-    from recon.export import ledger_months, month_label
-
-    report = SupplierReport(suppliers=[
-        Supplier("A Co", 0, 0, [_inv("A Co", "I1", 100, "05/04/2026", 0),
-                                _pay("A Co", "P1", 100, "n/a", 1)]),
-        Supplier("B Co", 0, 0, [_inv("B Co", "I1", 100, "28/12/2025", 2)])])
-    months = ledger_months(analyze(report))
-    assert months == ["2025-12", "2026-04"]
-    assert [month_label(m) for m in months] == ["Dec 2025", "Apr 2026"]
+def test_no_months_excluded_keeps_the_plain_closing_label():
+    labels = {r[4] for r in _rows(_excluding([])["Ledger"])}
+    assert "Closing balance" in labels
+    assert not any(str(x).startswith("Closing balance excl.") for x in labels)
 
 
 def test_ledger_totals_band_emitted_per_supplier():
