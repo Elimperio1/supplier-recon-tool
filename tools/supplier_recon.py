@@ -31,7 +31,7 @@ from ui import esc, tiles
 # class identity, missing dataclass field, ImportError on a new name). If the
 # in-memory engine's version is not the one this app.py was written against,
 # purge every recon module and re-import fresh.
-_EXPECTED_ENGINE_VERSION = 8
+_EXPECTED_ENGINE_VERSION = 9
 
 import recon.engine as _engine_mod  # noqa: E402
 
@@ -48,7 +48,7 @@ from recon.match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE,
                          account_payment_index, match_supplier)
 from recon.parse import (BankReport, SupplierReport, parse_bank_report,
                          parse_supplier_report)
-from recon.export import workbook_bytes
+from recon.export import ledger_months, month_label, workbook_bytes
 from recon import sheets as sheets_mod
 
 
@@ -239,10 +239,17 @@ tiles([
     ("Integrity issues", str(n_integ), "green" if n_integ == 0 else "red"),
 ])
 
-_, dcol = st.columns([3, 1])
+xcol, dcol = st.columns([3, 1])
+_exclude: list[str] = []
+if xcol.checkbox("Exclude months from Non-zero Ledger", key="nz_exclude"):
+    _months = ledger_months(engine)
+    # Keyed on the upload so a new report starts again on its own latest month.
+    _exclude = xcol.multiselect("Months to exclude", _months, default=_months[-1:],
+                                format_func=month_label, key=f"nz_months_{_sig}")
 dcol.download_button(
     "Download Excel workbook",
-    data=workbook_bytes(client or "client", engine, matches, supplier_report, bank_report),
+    data=workbook_bytes(client or "client", engine, matches, supplier_report, bank_report,
+                        exclude_months=_exclude),
     file_name=f"supplier_recon_{(client or 'client').strip().replace(' ', '_') or 'client'}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     width="stretch",

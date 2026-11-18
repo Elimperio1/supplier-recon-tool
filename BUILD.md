@@ -332,6 +332,12 @@ App
       `opening + credits − debits` must equal the closing figure
 - [ ] Ledger keeps the report's own **Balance** column, and the opening/closing
       bands sit in it, so the running balance reads as one continuous column
+- [ ] **Non-zero Ledger** sheet, straight after Ledger: the same layout, only the
+      accounts whose closing balance is not R0. With "Exclude months from Non-zero
+      Ledger" ticked, the picked months' rows leave this sheet, the closing band
+      becomes the report's closing less those rows, and an account that is R0 on
+      that figure leaves the sheet. The picker starts on the report's latest month.
+      The full Ledger sheet is never filtered
 - [ ] Ledger: amber Description = counterpart >30 days away, grade unchanged
 - [ ] `dayfirst` dates in any display parsing; future-dated closing rows kept
 

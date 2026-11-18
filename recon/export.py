@@ -19,10 +19,10 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .engine import (CAT_GREEN, CAT_INVOICES, CAT_PAYMENTS, GREEN_EPS,
                      LEDGER_GREEN, LEDGER_RED, LEDGER_YELLOW, CrossSettlement,
-                     CrossSupplierFinding, EngineResult, SupplierResult,
-                     ledger_rows)
+                     CrossSupplierFinding, EngineResult, LedgerRow, SupplierResult,
+                     _parse_dmy, ledger_rows)
 from .match import (VERDICT_AMBIGUOUS, VERDICT_CONFIDENT, VERDICT_NONE, MatchResult)
-from .parse import BankReport, SupplierReport
+from .parse import BankReport, SupplierReport, SupplierTxn
 
 HEADER_FILL = PatternFill("solid", fgColor="305496")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
@@ -244,7 +244,45 @@ def _totals_band(ws: Worksheet, r: int, debit: int, credit: int) -> int:
     return r + 1
 
 
-def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
+_MONTH_ABBR = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _month(t: SupplierTxn) -> Optional[str]:
+    d = _parse_dmy(t.date)
+    return None if d is None else f"{d.year:04d}-{d.month:02d}"
+
+
+def month_label(month: str) -> str:
+    """``2026-03`` -> ``Mar 2026``."""
+    year, mm = month.split("-")
+    return f"{_MONTH_ABBR[int(mm) - 1]} {year}"
+
+
+def ledger_months(engine: EngineResult) -> list[str]:
+    """Every month (``YYYY-MM``) holding a dated transaction, oldest first."""
+    return sorted({m for res in engine.suppliers for t in res.supplier.txns
+                   if (m := _month(t)) is not None})
+
+
+def _without_months(res: SupplierResult, exclude: frozenset[str]) -> tuple[list[LedgerRow], int]:
+    """The account's ledger rows outside ``exclude``, and its closing balance with
+    the excluded rows backed out of the report's own closing figure. A row whose
+    date does not parse is always kept."""
+    rows = ledger_rows(res)
+    if not exclude:
+        return rows, res.closing
+    kept, closing = [], res.closing
+    for row in rows:
+        if _month(row.txn) in exclude:
+            closing -= (row.txn.credit or 0) - (row.txn.debit or 0)
+        else:
+            kept.append(row)
+    return kept, closing
+
+
+def _ledger_sheet(ws: Worksheet, suppliers: Iterable[SupplierResult],
+                  exclude: frozenset[str] = frozenset(), *, open_only: bool = False) -> None:
     """The source report reproduced in full - every transaction with its date -
     each row graded: green = paid on the invoice date or up to 10 days after,
     yellow = same amount but needs review (paid BEFORE the invoice, too long
@@ -260,14 +298,20 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
                "Debit (R)", "Credit (R)", "Balance (R)", "Status", "Match"]
     _header(ws, headers)
     _autosize(ws, headers, {1: 34, 2: 12, 3: 16, 4: 18, 5: 46, 9: 12, 10: 42})
+    closing_label = "Closing balance"
+    if exclude:
+        closing_label += " excl. " + ", ".join(month_label(m) for m in sorted(exclude))
     r = 2
-    for res in engine.suppliers:
+    for res in suppliers:
+        rows, closing = _without_months(res, exclude)
+        if open_only and abs(closing) < GREEN_EPS:
+            continue
         # Gray bands bookend each account: opening balance above the
         # transactions, closing balance (with its SETTLED/OPEN badge) below.
         r = _balance_band(ws, r, res.name, "Opening balance", res.supplier.opening,
                           notes="; ".join(res.notes) if res.notes else None)
         debit_total = credit_total = 0
-        for row in ledger_rows(res):
+        for row in rows:
             t = row.txn
             debit_total += t.debit or 0
             credit_total += t.credit or 0
@@ -294,7 +338,7 @@ def _ledger_sheet(ws: Worksheet, engine: EngineResult) -> None:
             _put(ws, r, 10, row.note, text=True)
             r += 1
         r = _totals_band(ws, r, debit_total, credit_total)
-        r = _balance_band(ws, r, res.name, "Closing balance", res.closing, badge=True)
+        r = _balance_band(ws, r, res.name, closing_label, closing, badge=True)
         r += 1   # blank spacer row: clean break before the next supplier
 
 
@@ -361,11 +405,15 @@ def build_workbook(
     matches: dict[str, list[MatchResult]],
     supplier_report: SupplierReport,
     bank_report: Optional[BankReport] = None,
+    exclude_months: Iterable[str] = (),
 ) -> Workbook:
+    """``exclude_months`` (``YYYY-MM``) applies to the Non-zero Ledger only."""
     wb = Workbook()
     _summary_sheet(wb.active, engine)
     wb.active.title = "Summary"
-    _ledger_sheet(wb.create_sheet("Ledger"), engine)
+    _ledger_sheet(wb.create_sheet("Ledger"), engine.suppliers)
+    _ledger_sheet(wb.create_sheet("Non-zero Ledger"), engine.suppliers,
+                  frozenset(exclude_months), open_only=True)
     _payments_sheet(wb.create_sheet("Payments Needed"), matches, engine)
     _invoices_sheet(wb.create_sheet("Invoices Needed"), engine)
     _settlement_sheet(wb.create_sheet("Cross-Account"), engine.settlements)
