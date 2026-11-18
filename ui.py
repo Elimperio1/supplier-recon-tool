@@ -1,7 +1,7 @@
 """Shared design layer for the Recon Toolbox pages.
 
 The look is a locked light "Apple" aesthetic: system typography, translucent
-material cards, a segmented-control tab bar, stat tiles, press feedback, and all
+material cards, a segmented-control tab bar, unboxed stat figures, press feedback, and all
 default Streamlit chrome (menu, footer, header, sidebar) hidden. No sidebar.
 Selectors use the durable hooks first: data-testid, then ARIA roles.
 """
@@ -44,11 +44,9 @@ header[data-testid="stHeader"],footer,[data-testid="stSidebar"],[data-testid="st
 .hero__title{font-size:2.05rem;font-weight:640;letter-spacing:-.03em;color:var(--ink);
   line-height:1.05;}
 
-/* stat tiles ------------------------------------------------------------ */
-.tiles{display:grid;grid-template-columns:repeat(var(--n,5),1fr);gap:14px;margin:.2rem 0 1.1rem;}
-.tile{background:var(--surface);backdrop-filter:blur(20px) saturate(180%);
-  -webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--border);
-  border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);}
+/* stat figures, unboxed ---------------------------------------------------- */
+.tiles{display:grid;grid-template-columns:repeat(var(--n,5),1fr);gap:14px;margin:.4rem 0 1.1rem;}
+.tile{padding:0;}
 .tile__v{font-size:1.9rem;font-weight:640;letter-spacing:-.03em;color:var(--ink);line-height:1;}
 .tile__l{margin-top:.5rem;font-size:.72rem;font-weight:600;letter-spacing:.055em;
   text-transform:uppercase;color:var(--ink3);}
@@ -84,8 +82,11 @@ header[data-testid="stHeader"],footer,[data-testid="stSidebar"],[data-testid="st
   box-shadow:0 1px 2px rgba(0,0,0,.05);}
 .stButton>button:hover,.stDownloadButton>button:hover{background:#fafafa;border-color:rgba(0,0,0,.14);}
 .stButton>button:active,.stDownloadButton>button:active{transform:scale(.97);}
-.stDownloadButton>button{background:var(--accent);color:#fff;border-color:transparent;}
-.stDownloadButton>button:hover{background:var(--accent-press);}
+.stDownloadButton>button,.stButton>button[data-testid="stBaseButton-primary"]{
+  background:var(--accent);color:#fff;border-color:transparent;}
+.stDownloadButton>button:hover,.stButton>button[data-testid="stBaseButton-primary"]:hover{
+  background:var(--accent-press);color:#fff;border-color:transparent;}
+.stButton>button[data-testid="stBaseButton-primary"]:disabled{opacity:.4;}
 
 /* expanders as cards ---------------------------------------------------- */
 [data-testid="stExpander"]{border:1px solid var(--border);border-radius:var(--radius);

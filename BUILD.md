@@ -339,7 +339,8 @@ App
       workbook: both reports lose those rows (`parse.without_months`), each
       account's closing moves by the same amount, and the workbook is built from
       a fresh analysis of what is left. Closing bands read "Closing balance excl.
-      Mar 2026, ...". The tabs on screen keep the full report
+      Mar 2026, ...". The figures above the button follow the exclusion; the
+      tabs on screen keep the full report
 - [ ] Ledger: amber Description = counterpart >30 days away, grade unchanged
 - [ ] `dayfirst` dates in any display parsing; future-dated closing rows kept
 

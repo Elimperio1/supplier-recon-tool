@@ -158,20 +158,18 @@ def _manual_patterns(aliases, client: str) -> dict[str, list[str]]:
 # ===========================================================================
 
 
-# Sheets status is surfaced where it matters (inside the setup panel and on the
+# Sheets status is surfaced where it matters (under the inputs and on the
 # save/log controls), not as a persistent header badge.
 client_status, client_err = _sheets_client()
 
 # ---- Setup (main body, no sidebar) ----------------------------------------
-have_supplier = st.session_state.get("sup") is not None
-with st.expander("Data & client", expanded=not have_supplier):
-    cols = st.columns([1.2, 1, 1])
-    client = cols[0].text_input("Client name", value="",
-                                help="Scopes learned mapping rules and the match log.")
-    sup_file = cols[1].file_uploader("Supplier Transactions Report", type="csv", key="sup")
-    bank_file = cols[2].file_uploader("Banks & Credit Cards Report", type="csv", key="bank")
-    if client_status is None and client_err:
-        st.caption(f"Memory (Google Sheets) offline - recon still runs, saving disabled. {client_err}")
+cols = st.columns([1.2, 1, 1])
+client = cols[0].text_input("Client name", value="",
+                            help="Scopes learned mapping rules and the match log.")
+sup_file = cols[1].file_uploader("Supplier Transactions Report", type="csv", key="sup")
+bank_file = cols[2].file_uploader("Banks & Credit Cards Report", type="csv", key="bank")
+if client_status is None and client_err:
+    st.caption(f"Memory (Google Sheets) offline - recon still runs, saving disabled. {client_err}")
 
 
 def _load(uploaded):
@@ -200,7 +198,7 @@ if supplier_bytes is None:
 # a file and the last-run signature no longer matches, so Run must be clicked again.
 _sig = hashlib.md5(supplier_bytes + b"|" + (bank_bytes or b"")).hexdigest()
 _scope = "supplier + bank reports" if bank_bytes is not None else "supplier report only"
-if st.button(f"Run reconciliation  ·  {_scope}", type="primary", width="stretch"):
+if st.button(f"Run reconciliation  ·  {_scope}", type="primary"):
     st.session_state["run_sig"] = _sig
 
 if st.session_state.get("run_sig") != _sig:
@@ -229,23 +227,14 @@ engine = _analyze(supplier_bytes, _CACHE_VERSION, manual)
 bank_report = _parse_bank(bank_bytes, _CACHE_VERSION) if bank_bytes is not None else None
 matches = _bank_matches(engine, bank_report, manual)
 
-greens = engine.by_category(CAT_GREEN)
 pays = engine.by_category(CAT_PAYMENTS)
 invs = engine.by_category(CAT_INVOICES)
-n_integ = len(supplier_report.integrity_failures)
 
-# ---- Tiles + download -----------------------------------------------------
-tiles([
-    ("Suppliers", str(len(engine.suppliers)), "neutral"),
-    ("Green", str(len(greens)), "green"),
-    ("Payments needed", str(len(pays)), "red"),
-    ("Invoices needed", str(len(invs)), "red"),
-    ("Cross-account", str(len(engine.settlements)), "neutral"),
-    ("Integrity issues", str(n_integ), "green" if n_integ == 0 else "red"),
-])
-
-# Excluded months leave the whole workbook (both reports, re-analysed without
-# them); the tabs on this page keep the full report.
+# ---- Figures + download ---------------------------------------------------
+# Excluded months leave the figures and the whole workbook (both reports,
+# re-analysed without them); the tabs on this page keep the full report. The
+# figures sit above the controls that change them, so they fill in afterwards.
+stats = st.container()
 _, xcol, dcol = st.columns([2, 1, 1], vertical_alignment="center")
 _exclude: list[str] = []
 if xcol.checkbox("Exclude months", key="exclude_months"):
@@ -262,6 +251,16 @@ if _exclude:
     wb_matches = _bank_matches(wb_engine, wb_bank, manual)
 else:
     wb_supplier, wb_engine, wb_bank, wb_matches = supplier_report, engine, bank_report, matches
+n_integ = len(wb_supplier.integrity_failures)
+with stats:
+    tiles([
+        ("Suppliers", str(len(wb_engine.suppliers)), "neutral"),
+        ("Green", str(len(wb_engine.by_category(CAT_GREEN))), "green"),
+        ("Payments needed", str(len(wb_engine.by_category(CAT_PAYMENTS))), "red"),
+        ("Invoices needed", str(len(wb_engine.by_category(CAT_INVOICES))), "red"),
+        ("Cross-account", str(len(wb_engine.settlements)), "neutral"),
+        ("Integrity issues", str(n_integ), "green" if n_integ == 0 else "red"),
+    ])
 dcol.download_button(
     "Download Excel workbook",
     data=workbook_bytes(client or "client", wb_engine, wb_matches, wb_supplier, wb_bank,

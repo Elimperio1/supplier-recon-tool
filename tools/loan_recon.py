@@ -83,8 +83,7 @@ if name_a.lower() == name_b.lower():
     # Column and sheet names are built from these, so they must differ.
     name_a, name_b = f"{name_a} (A)", f"{name_b} (B)"
 
-run = st.button("Run reconciliation", type="primary", disabled=not (file_a and file_b),
-                width="stretch")
+run = st.button("Run reconciliation", type="primary", disabled=not (file_a and file_b))
 
 # The result is kept in session state, keyed on every input, so a rerun from the
 # download button or a tab click does not wipe it, and changing any input does.
