@@ -18,7 +18,7 @@ from .parse import Supplier, SupplierReport, SupplierTxn
 # Bumped on ANY change to result shapes or matching behavior. app.py uses this
 # both as the st.cache_data salt AND to detect a stale module surviving a
 # Streamlit Cloud redeploy (the process keeps sys.modules across git pushes).
-ENGINE_VERSION = 10
+ENGINE_VERSION = 11
 
 # Classification threshold: |closing| < 1 cent is green.
 GREEN_EPS = 1

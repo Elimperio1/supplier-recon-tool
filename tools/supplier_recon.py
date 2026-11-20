@@ -31,7 +31,7 @@ from ui import esc, tiles
 # class identity, missing dataclass field, ImportError on a new name). If the
 # in-memory engine's version is not the one this app.py was written against,
 # purge every recon module and re-import fresh.
-_EXPECTED_ENGINE_VERSION = 10
+_EXPECTED_ENGINE_VERSION = 11
 
 import recon.engine as _engine_mod  # noqa: E402
 

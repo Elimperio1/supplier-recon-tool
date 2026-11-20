@@ -100,17 +100,20 @@ def _summary_sheet(ws: Worksheet, engine: EngineResult) -> None:
 
 def _payments_sheet(ws: Worksheet, matches: dict[str, list[MatchResult]],
                     engine: EngineResult) -> None:
-    headers = ["Supplier", "Invoice Ref", "Invoice Date", "Amount (R)", "Verdict",
-               "Bank Account", "Bank Date", "Bank Description", "Bank Ref",
-               "Current GL", "Evidence", "Note"]
+    # Invoice Description carries the supplier's own invoice number, the one the
+    # client can look up; Invoice Ref is only Sage's SIV number.
+    headers = ["Supplier", "Invoice Ref", "Invoice Description", "Invoice Date",
+               "Amount (R)", "Verdict", "Bank Account", "Bank Date", "Bank Description",
+               "Bank Ref", "Current GL", "Evidence", "Note"]
     _header(ws, headers)
-    _autosize(ws, headers, {1: 30, 2: 16, 3: 13, 5: 12, 6: 16, 7: 12, 8: 40, 9: 16, 10: 26, 11: 20, 12: 40})
+    _autosize(ws, headers, {1: 30, 2: 16, 3: 40, 4: 13, 6: 12, 7: 16, 8: 12, 9: 40,
+                            10: 16, 11: 26, 12: 20, 13: 40})
     r = 2
     for res in engine.by_category(CAT_PAYMENTS):
         if res.bulk:
             _put(ws, r, 1, res.name, text=True)
-            _put(ws, r, 5, "BULK")
-            _put(ws, r, 12, "; ".join(res.notes), text=True)
+            _put(ws, r, 6, "BULK")
+            _put(ws, r, 13, "; ".join(res.notes), text=True)
             r += 1
             continue
         for m in matches.get(res.name, []):
@@ -119,20 +122,21 @@ def _payments_sheet(ws: Worksheet, matches: dict[str, list[MatchResult]],
             for i, cand in enumerate(cands):
                 _put(ws, r, 1, res.name if i == 0 else "", text=True)
                 _put(ws, r, 2, m.invoice.reference if i == 0 else "", text=True)
-                _put(ws, r, 3, m.invoice.date if i == 0 else "", text=True)
-                _put(ws, r, 4, _rand(m.amount_cents) if i == 0 else None, money=True)
-                vc = _put(ws, r, 5, m.verdict.upper() if i == 0 else "")
+                _put(ws, r, 3, m.invoice.description if i == 0 else "", text=True)
+                _put(ws, r, 4, m.invoice.date if i == 0 else "", text=True)
+                _put(ws, r, 5, _rand(m.amount_cents) if i == 0 else None, money=True)
+                vc = _put(ws, r, 6, m.verdict.upper() if i == 0 else "")
                 if i == 0 and fill:
                     vc.fill, vc.font = fill, font
                 if cand is not None:
-                    _put(ws, r, 6, cand.txn.account, text=True)
-                    _put(ws, r, 7, cand.txn.date, text=True)
-                    _put(ws, r, 8, cand.txn.description, text=True)
-                    _put(ws, r, 9, cand.txn.reference, text=True)
-                    _put(ws, r, 10, cand.txn.allocation, text=True)
-                    _put(ws, r, 11, ", ".join(cand.matched_tokens), text=True)
+                    _put(ws, r, 7, cand.txn.account, text=True)
+                    _put(ws, r, 8, cand.txn.date, text=True)
+                    _put(ws, r, 9, cand.txn.description, text=True)
+                    _put(ws, r, 10, cand.txn.reference, text=True)
+                    _put(ws, r, 11, cand.txn.allocation, text=True)
+                    _put(ws, r, 12, ", ".join(cand.matched_tokens), text=True)
                 if i == 0 and m.note:
-                    _put(ws, r, 12, m.note, text=True)
+                    _put(ws, r, 13, m.note, text=True)
                 r += 1
 
 

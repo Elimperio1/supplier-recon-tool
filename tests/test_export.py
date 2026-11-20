@@ -163,6 +163,33 @@ def test_no_months_excluded_keeps_the_plain_closing_label():
     assert not any(str(x).startswith("Closing balance excl.") for x in labels)
 
 
+def test_payments_needed_shows_the_invoice_description():
+    # The description holds the supplier's own invoice number; the Sage SIV ref
+    # stays in its own column beside it.
+    from recon.match import account_payment_index, match_supplier
+    from recon.parse import BankAccount, BankReport, BankTxn
+
+    report = SupplierReport(suppliers=[Supplier("Owed Co", 0, 5000, [
+        _inv("Owed Co", "SIV0042", 5000, "01/06/2026", 0, desc="INV 88231")])])
+    engine = analyze(report)
+    bank = BankReport(accounts=[BankAccount("FNB", 0, -5000, [
+        BankTxn("FNB", 0, "05/06/2026", "", "OWED CO", "B1",
+                "Account Payment", "Sundry", None, 5000, "")], -5000)])
+    index = account_payment_index(bank)
+    matches = {r.name: match_supplier(r, index) for r in engine.suppliers}
+    ws = build_workbook("Client", engine, matches, report, bank)["Payments Needed"]
+
+    rows = [[c.value for c in row] for row in ws.iter_rows(min_row=1)]
+    col = {h: i for i, h in enumerate(rows[0])}
+    assert rows[0][:4] == ["Supplier", "Invoice Ref", "Invoice Description", "Invoice Date"]
+    inv = rows[1]
+    assert inv[col["Invoice Ref"]] == "SIV0042"
+    assert inv[col["Invoice Description"]] == "INV 88231"
+    assert inv[col["Invoice Date"]] == "01/06/2026"
+    assert inv[col["Amount (R)"]] == 50.00
+    assert inv[col["Bank Description"]] == "OWED CO"
+
+
 def test_ledger_totals_band_emitted_per_supplier():
     a = Supplier("A Co", 0, 5000, [_inv("A Co", "I1", 5000, "01/06/2026", 0)])
     b = Supplier("B Co", 0, -2000, [_pay("B Co", "P1", 2000, "01/06/2026", 1)])
